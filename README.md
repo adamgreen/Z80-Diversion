@@ -49,32 +49,33 @@ I plan to leverage the programmable I/O (PIO) peripheral on the RP2040 for inter
 
 ## Initial Pin Map
 The PIO state machines place constraints on some signals as they will need to be mapped to consecutively numbered GPIO pins so that they can be shifted in/out as needed. This is how I think the pins should be mapped based on how I see the various Z80 signals being used by the PIO state machines:
-| RP2040 | Z80 / Shift | PIO Pin Group |
-|--------|-------------|---------------|
-| GP0  | Shift_In_Even | Input |
-| GP1  | Shift_In_Odd  | Input |
-| GP2  | MREQ'         | Input |
-| GP3  | IOREQ'        | Input |
-| GP4  | CLK           | Set |
-| GP5  | Shift_Clock   | Set |
-| GP6  | Shift_Latch   | Set |
-| GP7  | RD'           | Input |
-| GP8  | WR'           | Input |
-| GP9  | D0            | Input/Output |
-| GP10 | D1            | Input/Output |
-| GP11 | D2            | Input/Output |
-| GP12 | D3            | Input/Output |
-| GP13 | D4            | Input/Output |
-| GP14 | D5            | Input/Output |
-| GP15 | D6            | Input/Output |
-| GP16 | D7            | Input/Output |
-| GP17 | M1'           | Input |
-| GP18 | RFSH'         | Input |
-| GP19 | HALT'         | Input |
-| GP20 | WAIT'         | Set |
-| GP21 | NMI'          | Output / Non-PIO |
-| GP22 | INT'          | Output / Non-PIO |
-| GP26 | RESET'        | Output / Non-PIO |
+| RP2040 | Z80 / Shift | PIO Pin Group    | Notes |
+|--------|-------------|------------------|-------|
+| GP0  | Shift_In_Even | Input            | |
+| GP1  | Shift_In_Odd  | Input            | |
+| GP2  | MREQ'         | Input            | |
+| GP3  | IOREQ'        | Input            | |
+| GP4  | CLK           | Set              | 330Ω Pull-Up |
+| GP5  | Shift_Clock   | Set              | |
+| GP6  | Shift_Latch   | Set              | |
+| GP7  | RD'           | Input            | |
+| GP8  | WR'           | Input            | |
+| GP9  | D0            | Input/Output     | |
+| GP10 | D1            | Input/Output     | |
+| GP11 | D2            | Input/Output     | |
+| GP12 | D3            | Input/Output     | |
+| GP13 | D4            | Input/Output     | |
+| GP14 | D5            | Input/Output     | |
+| GP15 | D6            | Input/Output     | |
+| GP16 | D7            | Input/Output     | |
+| GP17 | M1'           | Input            | |
+| GP18 | RFSH'         | Input            | |
+| GP19 | HALT'         | Input            | |
+| GP20 | WAIT'         | Set              | 2.2kΩ Pull-Up |
+| GP21 | NMI'          | Output / Non-PIO | 2.2kΩ Pull-Up |
+| GP22 | INT'          | Output / Non-PIO | 2.2kΩ Pull-Up |
+| GP26 | RESET'        | Output / Non-PIO | 3 CLK Long Pulse (3µs @ 1MHz) |
+| N/C  | BUSREQ'       | Not Connected    | 2.2kΩ Pull-Up |
 
 
 ## GDB for Z80?
