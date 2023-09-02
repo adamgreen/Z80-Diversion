@@ -6,7 +6,7 @@ For now this page is just some notes as I start thinking about a [Z80](https://w
 I want to verify some unit tests which exercise all of the instructions supported by the Z80 microprocessor. These tests can be used to verify Z80 emulation. Having the ability to also runs these tests against real Z80 hardware is desireable as it allows verifying the quality of the tests themselves. A few years ago, I did something similar for the ARMv6-M instruction tests that I wrote for my [pinkySim project](https://github.com/adamgreen/pinkySim).
 
 ## Reading List
-![Build Your Own Z80 Computer Book Cover](photos/20130827-BuildYourOwnZ80ComputerBook.jpg)
+![Build Your Own Z80 Computer Book Cover](photos/20230827-BuildYourOwnZ80ComputerBook.jpg)
 
 It has been around a decade since I last looked at the Z80 so I had to skim through a few Z80 references to refresh my memory of what it takes to interface this little guy to the outside world. These references included:
 * [Build Your Own Z80 Computer by Steve Ciarcia](https://en.wikipedia.org/wiki/Build_Your_Own_Z80_Computer)
@@ -24,15 +24,15 @@ My current plan is to design and implement a simple Z80 based board that can be 
   * CMOS Based
   * 5.0V Nominal
   * 20 MHz capable. I picked the fastest CMOS version of the device available to increase the chances that it will work at 3.3V (same as the RP2040) when run at a lower frequency, between 1 and 3.5 MHz.
-  * 40-pin DIP package. Currently Digikey only has the DIP version of the 20MHz capable part in stock. I would have preferred the LQFP SMD version but it doesn't look like it will be in stock for awhile.
+  * 40-pin DIP package. Currently Digikey only has the DIP version of the 20MHz capable part in stock. I would have preferred the LQFP SMD version but it doesn't look like it will be in stock for awhile.<br>![Photo of Z80 IC](photos/20230901-Z80_Photo.jpg)
 * A [RP2040 based Pico](https://www.digikey.com/en/products/detail/raspberry-pi/SC0915/13624793). I want to connect this to the Z80 bus and use it to service Z80 memory requests. My plan is to make it work like a hardware debugger for the Z80. Features of the RP2040 that can be leveraged for this project include:
   * USB 1.1 controller and PHY. This can be used for easy connection to a desktop/laptop. The unit tests can be deployed and verified over this USB connection.
   * 264kB SRAM. This can be the backing store for the 64kB of address space supported by the Z80 while leaving lots around for other fun.
   * 2MB of FLASH. Lots of room for the required firmware and storage of any ROM images that we may want to use with the Z80.
   * Programmable I/O. This will be useful for interfacing with the Z80 bus without bit banging everything from the CPU.
-  * Dual core Cortex-M0+ cores. Can dedicate a core to just servicing memory read/writes requests from the Z80 as they are detected and pushed to the CPU by the PIO state machines. This way things like USB interrupts don't slow down processing of Z80 memory requests.
+  * Dual core Cortex-M0+ cores. Can dedicate a core to just servicing memory read/writes requests from the Z80 as they are detected and pushed to the CPU by the PIO state machines. This way things like USB interrupts don't slow down processing of Z80 memory requests.<br>![Photo of Raspberry Pi Pico](photos/20230901-RaspberryPiPico_RP2040.jpg)
   * The Pico has the required voltage regulation so that the board can be powered from USB.
-* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. Will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to a 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would then be greatly reduced.
+* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. Will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to a 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would then be greatly reduced.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
 
 ## Programmable I/O
 I plan to leverage the programmable I/O (PIO) peripheral on the RP2040 for interfacing to the Z80 bus. My current thoughts are to use 2 PIO state machines for this interfacing:
@@ -85,9 +85,11 @@ Can I do the same for the Z80? I found a page on the web which gives me a lot of
 * [chciken's TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
 
 ## Current Project State
-The Z80, RP2040 Pico boards, and SN74HC165 shift registers have been ordered from Digikey. Digikey has already shipped out this order.
+The Z80, RP2040 Pico boards, and SN74HC165 shift register ICs have arrived from Digikey.
 
 ## Next Steps
+* Use KiCAD to create schematic.
+* Use solderless breadboard for initial testing.
 * Use KiCAD to design the required PCB.
 * Order PCBs from [OSH Park](https://oshpark.com).
 * Receive parts from Digikey.
