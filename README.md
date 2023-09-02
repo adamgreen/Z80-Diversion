@@ -1,13 +1,13 @@
 # Z80 Diversion
-
 For now this page is just some notes as I start thinking about a [Z80](https://www.zilog.com/index.php?option=com_product&Itemid=26&task=docs&businessLine=&parent_id=139&familyId=20&productId=Z84C00) based diversion. I will add more substance once I design the PCB and start writing the needed firmware.
+
 
 ## Project Purpose
 I want to verify some unit tests which exercise all of the instructions supported by the Z80 microprocessor. These tests can be used to verify Z80 emulation. Having the ability to also runs these tests against real Z80 hardware is desireable as it allows verifying the quality of the tests themselves. A few years ago, I did something similar for the ARMv6-M instruction tests that I wrote for my [pinkySim project](https://github.com/adamgreen/pinkySim).
 
-## Reading List
-![Build Your Own Z80 Computer Book Cover](photos/20230827-BuildYourOwnZ80ComputerBook.jpg)
 
+## Reading List
+![Build Your Own Z80 Computer Book Cover](photos/20230827-BuildYourOwnZ80ComputerBook.jpg)<br>
 It has been around a decade since I last looked at the Z80 so I had to skim through a few Z80 references to refresh my memory of what it takes to interface this little guy to the outside world. These references included:
 * [Build Your Own Z80 Computer by Steve Ciarcia](https://en.wikipedia.org/wiki/Build_Your_Own_Z80_Computer)
 * [Z80 CPU User Manual](https://www.zilog.com/docs/z80/UM0080.pdf)
@@ -17,6 +17,7 @@ It has been around a decade since I last looked at the Z80 so I had to skim thro
 I also skimmed some RP2040 documentation again as well to make sure that I had a good chance of successfully interfacing it to the Z80 before going too far down that path:
 * [Raspberry Pi Pico Datasheet](https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf)
 * [RP2040 Datasheet](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf)
+
 
 ## High Level BOM
 My current plan is to design and implement a simple Z80 based board that can be used to run and verify these unit tests. To that end, I think this board should include:
@@ -34,6 +35,7 @@ My current plan is to design and implement a simple Z80 based board that can be 
   * The Pico has the required voltage regulation so that the board can be powered from USB.
 * 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. Will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to a 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would then be greatly reduced.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
 
+
 ## Programmable I/O
 I plan to leverage the programmable I/O (PIO) peripheral on the RP2040 for interfacing to the Z80 bus. My current thoughts are to use 2 PIO state machines for this interfacing:
 * One state machine will generate the main **CLK** signal, samples the **MREQ'** / **IOREQ'** signals and shifts out the 16-bit address bits using two 8-bit shift registers:
@@ -46,6 +48,7 @@ I plan to leverage the programmable I/O (PIO) peripheral on the RP2040 for inter
   * If a read has been requested then the **WAIT'** signal can be asserted to let the Z80 know that it is waiting for the CPU to access the requested data.
   * The state of the **RD'**/**WR'** lines and **D0** - **D7** are then transferred to the CPU so that between this data and the 16-bit address from the other state machine, the CPU has enough information to process the memory request.
   * If a read was requested then the state machine will wait for the CPU to send back the required 8-bits of data to be asserted onto the **DO** - **D7** signal lines while also de-asserting the **WAIT'** signal.
+
 
 ## Initial Pin Map
 The PIO state machines place constraints on some signals as they will need to be mapped to consecutively numbered GPIO pins so that they can be shifted in/out as needed. This is how I think the pins should be mapped based on how I see the various Z80 signals being used by the PIO state machines:
@@ -78,17 +81,25 @@ The PIO state machines place constraints on some signals as they will need to be
 | N/C  | BUSREQ'       | Not Connected    | 2.2kΩ Pull-Up |
 
 
+## Initial Schematic
+![Initial Schematic](photos/20230902-Schematic.jpg)<br>
+I have started working on the schematic for this project. I want to try initially wiring up most of it up on a breadboard before actually designing a PCB:
+* I may need to move some of the signals around on the RP2040 to simplify the PIO code but I won't know until I start writing and testing the PIO code itself.
+* I also want to test that the Z80 will run reliably at 3.3V when run at lower clock rates and that the SN74HC165 shift registers can run at 50MHz when running at 5.0V.
+
+
 ## GDB for Z80?
 I have past experience with using GDB and GDB debug stubs to debug Cortex-M microcontrollers. Can I leverage this experience by using GDB with the Z80? If so then I could use it for deploying test code to the Z80, single stepping, examining memory and registers, etc. When I tested my ARMv6-M instruction tests on real Cortex-M hardware, I used an existing GDB debug stub and modified my test harness to pretend to be GDB so that it could place required inputs and code into RAM, setup the registers, single step over the test instruction, and then interrogate memory and registers afterwards to verify that the expected side effects occurred.
 
 Can I do the same for the Z80? I found a page on the web which gives me a lot of hope that it can:
 * [chciken's TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
 
+
 ## Current Project State
-The Z80, RP2040 Pico boards, and SN74HC165 shift register ICs have arrived from Digikey.
+The Z80, RP2040 Pico, and SN74HC165 shift register devices have arrived from Digikey and I have completed the initial schematic. I will try implementing it on a breadboard next.
+
 
 ## Next Steps
-* Use KiCAD to create schematic.
 * Use solderless breadboard for initial testing.
 * Use KiCAD to design the required PCB.
 * Order PCBs from [OSH Park](https://oshpark.com).
