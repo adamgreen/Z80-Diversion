@@ -82,7 +82,7 @@ The PIO state machines place constraints on some signals as they will need to be
 
 
 ## Updated Schematic
-![Updated Schematic](photos/20230902-Schematic.jpg)<br>
+![Updated Schematic](photos/20230915-Schematic.jpg)<br>
 After wiring up this circuit on a breadboard, I found that things worked better if I made some changes to my original schematic:
 * I originally thought it would work best to shift in the Z80 address bit pairs in from least significant to most significant. This results in the CPU receiving the address in the upper 16 bits and the **MREQ'** and **IOREQ'** signals values in bits 14-15. It would be nicer if the address bits were in the lower 16-bits where they can be easily masked off and used. Doing the shifts in this order required me reversing the order of the Z80 address bit connections to each of the shift registers.
 * Added 0.1µF bypass capacitors to the IC power supply lines.
