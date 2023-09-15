@@ -9,3 +9,9 @@ fp-info-cache
 **/gerbers/
 **/*-backups/
 **/_autosave-*
+
+# CMake / Pico SDK temporary build files.
+build/
+
+# Temporary log files.
+mri.log
