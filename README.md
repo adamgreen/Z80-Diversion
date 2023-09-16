@@ -94,6 +94,11 @@ After wiring up this circuit on a breadboard, I found that things worked better 
 * I removed the 330Ω pull-up resistor from the **CLK** signal. It was needed for old TTL clocking circuits used with the older NMOS version of the Z80. I am using a CMOS version of the Z80 and driving **CLK** directly from a pin of the CMOS based RP2040 microcontroller so it isn't needed anymore.
 
 
+## PCB Design version 1.1
+![OSHPark image of PCB Front](photos/20230916-PcbFront.png)<br>
+I have completed the initial PCB design and sent it off to OSHPark to have it fabricated. It should be a lot easier to work with this board than the current mess of wires that I have on my desk.
+
+
 ## GDB for Z80?
 I have past experience with using GDB and GDB debug stubs to debug Cortex-M microcontrollers. Can I leverage this experience by using GDB with the Z80? If so then I could use it for deploying test code to the Z80, single stepping, examining memory and registers, etc. When I tested my ARMv6-M instruction tests on real Cortex-M hardware, I used an existing GDB debug stub and modified my test harness to pretend to be GDB so that it could place required inputs and code into RAM, setup the registers, single step over the test instruction, and then interrogate memory and registers afterwards to verify that the expected side effects occurred.
 
@@ -102,7 +107,11 @@ Can I do the same for the Z80? I found a page on the web which gives me a lot of
 
 
 ## Current Project State
-The Z80, RP2040 Pico, and SN74HC165 shift register devices have arrived from Digikey and I have completed the initial schematic. I also wired it up on my breadboard.
+* The Z80, RP2040 Pico, and SN74HC165 shift register devices have arrived from Digikey.
+* I completed the initial schematic in KiCAD.
+* I wired up an initial test version on my breadboard.
+* I completed the initial PCB design in KiCAD.
+* I ordered PCBs from [OSHPark](https://oshpark.com).
 
 ![Photo of Breadboard Setup](photos/20230908-Breadboard.jpg)
 
@@ -111,6 +120,7 @@ The screenshot below shows some early traces from my logic analyzer as I began t
 ![Initial Trace](photos/20230908-AnalyzerTrace.png)
 
 ## Next Steps
-* Use KiCAD to design the required PCB.
-* Order PCBs from [OSH Park](https://oshpark.com).
+* Wait for fabricated PCBs to arrive from OSHPark.
+* Solder up one of the PCBs and test it out with the code that I have developed so far.
+* Continue development on the firmware.
 
