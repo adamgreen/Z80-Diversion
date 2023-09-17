@@ -119,8 +119,11 @@ The screenshot below shows some early traces from my logic analyzer as I began t
 
 ![Initial Trace](photos/20230908-AnalyzerTrace.png)
 
+
 ## Next Steps
 * Wait for fabricated PCBs to arrive from OSHPark.
+* Research GDB for Z80 a bit more while waiting for PCBs to arrive.
 * Solder up one of the PCBs and test it out with the code that I have developed so far.
 * Continue development on the firmware.
+  * I have an idea of another way to implement the PIO state machine which may simplify the code and allow for faster clock rates.
 
