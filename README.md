@@ -105,13 +105,25 @@ I have past experience with using GDB and GDB debug stubs to debug Cortex-M micr
 Can I do the same for the Z80? I found a page on the web which gives me a lot of hope that it can:
 * [chciken's TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
 
+I have been able to download and build the same Z80 fork as @chciken:
+* ```git clone https://github.com/b-s-a/binutils-gdb.git z80-gdb```
+* ```brew install texinfo```
+* ```cd z80-gdb```
+* ```mkdir build/```
+* ```cd build/```
+* ```LDFLAGS=-Bstatic ../configure --target=z80-unknown-elf --disable-werror --prefix=$(pwd) --exec-prefix=$(pwd)```
+* ```make```
+* **Note:** I don't have ```make install``` working on macOS yet. Until then, the GDB binary can be found as ```z80-gdb/build/gdb/gdb```
+
+
 
 ## Current Project State
 * The Z80, RP2040 Pico, and SN74HC165 shift register devices have arrived from Digikey.
 * I completed the initial schematic in KiCAD.
 * I wired up an initial test version on my breadboard.
 * I completed the initial PCB design in KiCAD.
-* I ordered PCBs from [OSHPark](https://oshpark.com).
+* I ordered PCBs from [OSHPark](https://oshpark.com). The board has already been assigned to a panel and sent off to be manufactured.
+* I was able to download a Z80 port of binutils/GDB and got it to build on my Mac.
 
 ![Photo of Breadboard Setup](photos/20230908-Breadboard.jpg)
 
@@ -122,8 +134,8 @@ The screenshot below shows some early traces from my logic analyzer as I began t
 
 ## Next Steps
 * Wait for fabricated PCBs to arrive from OSHPark.
-* Research GDB for Z80 a bit more while waiting for PCBs to arrive.
 * Solder up one of the PCBs and test it out with the code that I have developed so far.
 * Continue development on the firmware.
   * I have an idea of another way to implement the PIO state machine which may simplify the code and allow for faster clock rates.
+  * Update MRI core to handle 16-bit registers/addresses. Today it only supports 32-bit devices. This is a good change to make anyway as there has been some interest as of late to support 64-bit architectures as well.
 
