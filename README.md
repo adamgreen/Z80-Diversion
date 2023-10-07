@@ -32,7 +32,7 @@ My current plan is to design and implement a simple Z80 based board that can be 
   * Programmable I/O. This will be useful for interfacing with the Z80 bus without bit banging everything from the CPU.
   * Dual core Cortex-M0+ cores. Can dedicate a core to just servicing memory read/writes requests from the Z80 as they are detected and pushed to the CPU by the PIO state machines. This way things like USB interrupts don't slow down processing of Z80 memory requests.<br>![Photo of Raspberry Pi Pico](photos/20230901-RaspberryPiPico_RP2040.jpg)
   * The Pico has the required voltage regulation to allow the board to be powered direclty from USB.
-* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. I will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to a 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would decrease. There is a good chance that I will use a faster version of this chip in future revisions.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
+* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. I will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would decrease. There is a good chance that I will use a faster version of this chip in future revisions.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
 
 
 ## Programmable I/O
@@ -98,11 +98,18 @@ After wiring up this circuit on a breadboard, I found that things worked better 
 ![OSHPark image of PCB Front](photos/20230916-PcbFront.png)<br>
 I have completed the initial PCB design and sent it off to OSHPark to have it fabricated. It should be a lot easier to work with this board than the current mess of wires that I have on my desk.
 
+### Issues Discovered in Version 1.1
+After soldering up the first of the version 1.1 PCBs I encountered an issue:
+* When soldering the Raspberry Pi Pico to the PCB as a surface mount part there isn't enough clearance between the bottom of the USB connector on the Pico and my PCB.
+  * I had to file out a groove to have it work with my USB cable on the first board I soldered up since I had already soldered down the Pico down flat to the PCB surface.
+  * On subsequent assemblies of this version of the PCB I will use male headers to mount the Pico as a through hole part (the footprint allows both SMD and through hole mounting). This will lift the Pico up off of the PCB to make room for the USB cable housing.
+  * If I make another version of this PCB, I will align the Pico's USB connector with the edge of the PCB to eliminate this issue.
+
 
 ## GDB for Z80?
 I have past experience with using GDB and GDB debug stubs to debug Cortex-M microcontrollers. Can I leverage this experience by using GDB with the Z80? If so then I could use it for deploying test code to the Z80, single stepping, examining memory and registers, etc. When I tested my ARMv6-M instruction tests on real Cortex-M hardware, I used an existing GDB debug stub and modified my test harness to pretend to be GDB so that it could place required inputs and code into RAM, setup the registers, single step over the test instruction, and then interrogate memory and registers afterwards to verify that the expected side effects occurred.
 
-Can I do the same for the Z80? I found a page on the web which gives me a lot of hope that it can:
+Can I do the same for the Z80? I found a page on the web which gave me hope that it could be done:
 * [chciken's TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
 
 I have been able to download and build the same Z80 fork as @chciken:
@@ -121,11 +128,17 @@ I have been able to download and build the same Z80 fork as @chciken:
 * The Z80, RP2040 Pico, and SN74HC165 shift register devices have arrived from Digikey.
 * I completed the initial schematic in KiCAD.
 * I wired up an initial test version on my breadboard.
+* I wrote simple proof of concept PIO and ARM code for the RP2040 to verify my hardware setup.
 * I completed the initial PCB design in KiCAD.
-* I ordered PCBs from [OSHPark](https://oshpark.com). The board has already been assigned to a panel and sent off to be manufactured.
+* I have ordered and received PCBs from [OSHPark](https://oshpark.com).
 * I was able to download a Z80 port of binutils/GDB and got it to build on my Mac.
+* I soldered up one of the PCBs and successfully tested it out with the code that I have developed so far.
 
+### Started Here
 ![Photo of Breadboard Setup](photos/20230908-Breadboard.jpg)
+
+### Now Here
+![Photo of first soldered up PCB](photos/20231007-FirstPCB.jpg)
 
 The screenshot below shows some early traces from my logic analyzer as I began to get the Z80 successfully starting up and executing NOPs supplied by the RP2040.
 
@@ -133,9 +146,6 @@ The screenshot below shows some early traces from my logic analyzer as I began t
 
 
 ## Next Steps
-* Wait for fabricated PCBs to arrive from OSHPark.
-* Solder up one of the PCBs and test it out with the code that I have developed so far.
-* Continue development on the firmware.
-  * I have an idea of another way to implement the PIO state machine which may simplify the code and allow for faster clock rates.
-  * Update MRI core to handle 16-bit registers/addresses. Today it only supports 32-bit devices. This is a good change to make anyway as there has been some interest as of late to support 64-bit architectures as well.
-
+* I have an idea of another way to implement the PIO state machine which may simplify the code and allow for faster clock rates.
+* Update MRI core to handle 16-bit registers/addresses. Today it only supports 32-bit devices. This is a good change to make anyway as there has been some interest as of late to support 64-bit architectures as well.
+* Get MRI working with the Z80 on the RP2040 to allow GDB programming and debugging.
