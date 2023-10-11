@@ -47,7 +47,7 @@ static const uint32_t SHIFT_CLOCK_PIN = 5;
 static const uint32_t SHIFT_LATCH_PIN = 6;
 
 // What frequency should the Z80 be clocked at?
-static const uint32_t Z80_FREQUENCY = 1000;
+static const uint32_t Z80_FREQUENCY = 500000;
 
 
 #include <hardware/dma.h>
@@ -146,6 +146,7 @@ class Z80_Bus
             bool isRead = !(dataBits & (1 << 0));
             bool isWrite = !(dataBits & (1 << 1));
             assert ( isRead ^ isWrite );
+            assert ( !isM1 || (isM1 && !isWrite) );
             pReq->value = (dataBits >> 2) & 0xFF;
             pReq->isRead = isRead;
             pReq->isM1 = isM1;
@@ -706,16 +707,50 @@ int main()
         // Value to increment.
         0x00, 0x00
     };
+    const size_t counterOffset = sizeof(memory) - 2;
+
+    // Trace log of what should be expected for each Z80 read/write request when running the above program.
+    struct Trace
+    {
+        uint16_t expectedAddress;
+        bool expectedM1;
+        bool expectedWrite;
+        bool checkCounter;
+    } trace[] =
+    {
+        // Address, M1,     WR,     Check Counter
+        { 0x0000,   true,   false,  false },
+        { 0x0001,   false,  false,  false },
+        { 0x0002,   false,  false,  false },
+        { 0x000A,   false,  false,  false },
+        { 0x000B,   false,  false,  false },
+        { 0x0003,   true,   false,  false },
+        { 0x0004,   true,   false,  false },
+        { 0x0005,   false,  false,  false },
+        { 0x0006,   false,  false,  false },
+        { 0x000A,   false,  true,   false },
+        { 0x000B,   false,  true,   true },
+        { 0x0007,   true,   false,  false },
+        { 0x0008,   false,  false,  false },
+        { 0x0009,   false,  false,  false }
+    };
 
     printf("Z80 should now be running...\n");
-    uint16_t expectedCount = 0x0000;
+    volatile uint16_t expectedCount = 0x0000;
+    volatile size_t traceIndex = 0;
     while (true)
     {
         // Fetch next read/write transfer request.
-        struct Z80_Bus::Request req;
-        z80Bus.getNextRequest(&req);
+        volatile struct Z80_Bus::Request req;
+        z80Bus.getNextRequest((Z80_Bus::Request*)&req);
         assert ( req.address < sizeof(memory) );
         assert ( req.isMReq );
+
+        // Verify that this request matches the expected trace.
+        volatile Trace* pTrace = &trace[traceIndex];
+        assert ( pTrace->expectedAddress == req.address );
+        assert ( pTrace->expectedM1 == req.isM1 );
+        assert ( pTrace->expectedWrite == !req.isRead );
 
         // Perform the memory read or write from/to RAM and send response to Z80 via PIO.
         bool isRead = req.isRead;
@@ -736,15 +771,17 @@ int main()
                 printf("[%04lX]<-%02lX\n", req.address, req.value);
             }
         }
-        z80Bus.completeRequest(&req);
+        z80Bus.completeRequest((Z80_Bus::Request*)&req);
 
-        // Check the 16-bit counter on each iteration of the loop.
-        if (isRead && address == 0x0000)
+        // Check the 16-bit counter right after it has been written.
+        if (pTrace->checkCounter)
         {
             uint16_t counter;
-            memcpy(&counter, &memory[0xA], sizeof(counter));
-            assert ( counter == expectedCount++ );
+            expectedCount++;
+            memcpy(&counter, &memory[counterOffset], sizeof(counter));
+            assert ( counter == expectedCount );
         }
+        traceIndex = (traceIndex + 1) % (sizeof(trace)/sizeof(trace[0]));
     }
 
     return 0;
