@@ -116,20 +116,39 @@ class Z80_Bus
         // Structure used to return information about the latest MREQ or IOREQ from the Z80.
         struct Request
         {
-            uint32_t value;
+            // UNDONE: Make value uint8_t and address uint16_t.
+            // 16-bit address requested by Z80.
             uint32_t address;
+            // Request has either MREQ' or IOREQ' asserted.
             bool isMReq;
+            // Request has either RD' or WR' asserted.
             bool isRead;
+            // Was M1' asserted?
+            bool isM1;
+            // 8-bit data value for this Z80 request.
+            // isRead == false
+            //  getNextRequest() will set this to 8-bit value to be written to address.
+            // isRead == true
+            //  Caller must set to appropriate value (based on address) before calling completeRequest().
+            uint32_t value;
         };
 
+        // Returns the next Z80 8-bit read or write request in Request structure.
+        // Caller must call completeRequest() once done processing this read/write request so that the Z80 WAIT'
+        // signal can be de-asserted.
+        //
+        // pReq - Pointer to Request structure to be filled in with information about the current Z80 read/write
+        //        request. Will be passed into completeRequest() as well.
         void getNextRequest(Request* pReq)
         {
             uint32_t dataBits = pio_sm_get_blocking(m_readWritePIO, m_readWriteStateMachine);
-            bool isRead = !(dataBits & 0x1);
-            bool isWrite = !(dataBits & 0x2);
+            bool isM1 = !(dataBits & (1 << 10));
+            bool isRead = !(dataBits & (1 << 0));
+            bool isWrite = !(dataBits & (1 << 1));
             assert ( isRead ^ isWrite );
             pReq->value = (dataBits >> 2) & 0xFF;
             pReq->isRead = isRead;
+            pReq->isM1 = isM1;
 
             uint32_t addressBits = pio_sm_get_blocking(m_addressPIO, m_addressStateMachine);
             bool isMReq = !!(addressBits & 0x10000);
@@ -137,24 +156,38 @@ class Z80_Bus
             assert ( isMReq ^ isIoReq );
             pReq->address = addressBits & 0xFFFF;
             pReq->isMReq = isMReq;
-
-            // UNDONE: Can I make these class protected members?
-            const uint32_t waitMREQInstruction = pio_encode_wait_gpio(true, m_mreqPin) | pio_encode_sideset(2, 0b10);
-            const uint32_t waitIOREQInstruction = pio_encode_wait_gpio(true, m_ioreqPin) | pio_encode_sideset(2, 0b10);
-            pio_sm_put_blocking(m_addressPIO, m_addressStateMachine, isMReq ? waitMREQInstruction : waitIOREQInstruction);
-
-            // If this was a write then we have everything we need so we can release the read/write state machine.
-            if (isWrite)
-            {
-                releaseReadWriteStateMachine(false, 0x00);
-            }
         }
 
-        // UNDONE: Rename this to completeRequest() and call for writes as well.
-        // Also pass in the Request structure with value member filled in for reads.
-        void returnReadData(uint8_t value)
+        // Called once caller is done processing the most recent read/write request returned from getNextRequest().
+        // Will de-assert Z80 WAIT' signal. For Z80 RD' requests it will also provide the requested 8-bit value to
+        // the Z80 over D0-D7.
+        //
+        // pReq - Pointer to the Request structure filled in by the most recent call to getNextRequest().
+        //        When processing Z80 read requests, pReq->value must be filled in by the caller with the appropriate
+        //        8-bit value to be sent to the Z80 over D0-D7.
+        void completeRequest(const Request* pReq)
         {
-            releaseReadWriteStateMachine(true, value);
+            const uint32_t pinDirOutput = 0xFF;
+            const uint32_t pinDirInput = 0x00;
+
+            // Let ReadWriteStateMachine know that CPU is done processing current Z80 read/write request.
+            // ReadWriteStateMachine sets D0-D7 pin directions correctly for request (output for reads and input for
+            // writes) and then sets D0-D7 pins to pReq->value. It then waits for RD' or WR' (which depends on WAIT
+            // instruction sent by CPU below) to be de-asserted. Once RD'/WR' has been de-asserted then D0-D7 pin
+            // directions are set back to input.
+            bool isRead = pReq->isRead;
+            uint32_t value = pReq->value & 0xFF;
+            uint32_t pinDirsAndData = (value << 8) | (isRead ? pinDirOutput : pinDirInput);
+            uint32_t pioInstructionAndPinDirs = (pinDirInput << 16) | (isRead ? m_waitReadInstruction : m_waitWriteInstruction);
+            pio_sm_put_blocking(m_readWritePIO, m_readWriteStateMachine, pinDirsAndData);
+            pio_sm_put_blocking(m_readWritePIO, m_readWriteStateMachine, pioInstructionAndPinDirs);
+
+            // Let AddressStateMachine know that CPU is done processing current Z80 read/write request.
+            // AddressStateMachine will de-assert Z80 WAIT' signal and wait for MREQ' or IOREQ' (which depends on WAIT
+            // instruction sent by CPU below) to be de-asserted.
+            // NOTE: AddressStateMachine is responsible for de-asserting WAIT' so complete it last.
+            bool isMReq = pReq->isMReq;
+            pio_sm_put_blocking(m_addressPIO, m_addressStateMachine, isMReq ? m_waitMREQInstruction : m_waitIOREQInstruction);
         }
 
 
@@ -162,37 +195,25 @@ class Z80_Bus
         void resetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Frequency);
         bool initClockStateMachine(uint32_t frequency, uint32_t z80ClockPin);
         bool initClockStateMachine(PIO pio, uint32_t frequency, uint32_t z80ClockPin);
-        bool initAddressStateMachine(uint32_t frequency, uint32_t shiftClockPin, uint32_t shiftLatchPin,
-                                     uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
-                                     uint32_t rfshPin);
-        bool initAddressStateMachine(PIO pio, uint32_t frequency,
+        bool initAddressStateMachine(uint32_t frequency, uint32_t waitPin,
                                      uint32_t shiftClockPin, uint32_t shiftLatchPin,
                                      uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
                                      uint32_t rfshPin);
-        bool initReadWriteStateMachine(uint32_t waitPin,
-                                       uint32_t rdPin, uint32_t wrPin,
+        bool initAddressStateMachine(PIO pio, uint32_t frequency, uint32_t waitPin,
+                                     uint32_t shiftClockPin, uint32_t shiftLatchPin,
+                                     uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
+                                     uint32_t rfshPin);
+        bool initReadWriteStateMachine(uint32_t rdPin, uint32_t wrPin,
                                        uint32_t d0Pin, uint32_t d1Pin, uint32_t d2Pin, uint32_t d3Pin,
                                        uint32_t d4Pin, uint32_t d5Pin, uint32_t d6Pin, uint32_t d7Pin,
                                        uint32_t m1Pin);
         bool initReadWriteStateMachine(PIO pio,
-                                       uint32_t waitPin,
                                        uint32_t rdPin, uint32_t wrPin,
                                        uint32_t d0Pin, uint32_t d1Pin, uint32_t d2Pin, uint32_t d3Pin,
                                        uint32_t d4Pin, uint32_t d5Pin, uint32_t d6Pin, uint32_t d7Pin,
                                        uint32_t m1Pin);
-        void releaseReadWriteStateMachine(bool isRead, uint8_t value)
-        {
-            // UNDONE: Protected members?
-            const uint32_t pinDirOutput = 0xFF;
-            const uint32_t pinDirInput = 0x00;
-            const uint32_t waitReadInstruction = pio_encode_wait_gpio(true, m_rdPin) | pio_encode_sideset(1, 1);
-            const uint32_t waitWriteInstruction = pio_encode_wait_gpio(true, m_wrPin) | pio_encode_sideset(1, 1);
+        void cacheWaitInstructionOpCodes();
 
-            uint32_t pinDirsAndData = (value << 8) | (isRead ? pinDirOutput : pinDirInput);
-            uint32_t pioInstructionAndPinDirs = (pinDirInput << 16) | (isRead ? waitReadInstruction : waitWriteInstruction);
-            pio_sm_put_blocking(m_readWritePIO, m_readWriteStateMachine, pinDirsAndData);
-            pio_sm_put_blocking(m_readWritePIO, m_readWriteStateMachine, pioInstructionAndPinDirs);
-        }
 
         // Unknown values can be set to this.
         const uint32_t UNKNOWN_VAL = 0xFFFFFFFF;
@@ -240,6 +261,13 @@ class Z80_Bus
         uint32_t        m_d5Pin = 0;
         uint32_t        m_d6Pin = 0;
         uint32_t        m_d7Pin = 0;
+
+        // Cache of WAIT GPIO instructions that are sent to state machines to execute upon completion of read/write
+        // request.
+        uint32_t m_waitReadInstruction = 0;
+        uint32_t m_waitWriteInstruction = 0;
+        uint32_t m_waitMREQInstruction = 0;
+        uint32_t m_waitIOREQInstruction = 0;
 };
 
 
@@ -275,13 +303,14 @@ bool Z80_Bus::init(uint32_t frequency,
 
     resetZ80(resetPin, z80ClockPin, frequency);
 
-    if (!initAddressStateMachine(frequency, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin) ||
-        !initReadWriteStateMachine(waitPin, rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin) ||
+    if (!initAddressStateMachine(frequency, waitPin, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin) ||
+        !initReadWriteStateMachine(rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin) ||
         !initClockStateMachine(frequency, z80ClockPin))
     {
         uninit();
         return false;
     }
+    cacheWaitInstructionOpCodes();
 
     m_haltPin = haltPin;
 
@@ -375,12 +404,13 @@ bool Z80_Bus::initClockStateMachine(PIO pio, uint32_t frequency, uint32_t z80Clo
     return true;
 }
 
-bool Z80_Bus::initAddressStateMachine(uint32_t frequency, uint32_t shiftClockPin, uint32_t shiftLatchPin,
+bool Z80_Bus::initAddressStateMachine(uint32_t frequency, uint32_t waitPin,
+                                      uint32_t shiftClockPin, uint32_t shiftLatchPin,
                                       uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
                                       uint32_t rfshPin)
 {
-    if (initAddressStateMachine(pio0, frequency, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin) ||
-        initAddressStateMachine(pio1, frequency, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin))
+    if (initAddressStateMachine(pio0, frequency, waitPin, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin) ||
+        initAddressStateMachine(pio1, frequency, waitPin, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin))
     {
         return true;
     }
@@ -389,7 +419,7 @@ bool Z80_Bus::initAddressStateMachine(uint32_t frequency, uint32_t shiftClockPin
 
 
 
-bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency,
+bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency, uint32_t waitPin,
                                       uint32_t shiftClockPin, uint32_t shiftLatchPin,
                                       uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
                                       uint32_t rfshPin)
@@ -406,6 +436,7 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency,
     }
 
     // Remember the pins along with PIO instance and state machine.
+    m_waitPin = waitPin;
     m_shiftClockPin = shiftClockPin;
     m_shiftLatchPin = shiftLatchPin;
     m_shiftEvenPin = shiftEvenPin;
@@ -424,6 +455,9 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency,
 
     // Side Set needs to be configured for the Shift Clock and Latch pins.
     sm_config_set_sideset_pins(&smConfig, m_shiftClockPin);
+
+    // SET pins should be configured for the WAIT' pin.
+    sm_config_set_set_pins(&smConfig, m_waitPin, 1);
 
     // ISR should be configured for auto push with a threshold of 16+2=18.
     // IOREQ', MREQ', A15...A0
@@ -461,13 +495,15 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency,
     // Configure following pins to be outputs controlled by PIO:
     //  Shift Clock pin should start out set to '0'.
     //  Shift Latch pin should start out set to '1'.
-    uint32_t outputPinMask = (1 << m_shiftClockPin) | (1 << m_shiftLatchPin);
+    //  WAIT' pin should start out set to '1'.
+    uint32_t outputPinMask = (1 << m_shiftClockPin) | (1 << m_shiftLatchPin) | (1 << m_waitPin);
     uint32_t inputPinMask = (1 << m_shiftEvenPin) | (1 << m_shiftOddPin) | (1 << m_mreqPin) | (1 << m_ioreqPin);
-    uint32_t highOutputPins = (1 << m_shiftLatchPin);
+    uint32_t highOutputPins = (1 << m_shiftLatchPin) | (1 << m_waitPin);
     pio_sm_set_pins_with_mask(pio, stateMachine, highOutputPins, outputPinMask);
     pio_sm_set_pindirs_with_mask(pio, stateMachine, outputPinMask, outputPinMask | inputPinMask);
     pio_gpio_init(pio, m_shiftClockPin);
     pio_gpio_init(pio, m_shiftLatchPin);
+    pio_gpio_init(pio, m_waitPin);
 
     // Disable the pull-up/down resistors on the Shift_Even/Odd signals.
     gpio_disable_pulls(m_shiftEvenPin);
@@ -489,14 +525,13 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency,
     return true;
 }
 
-bool Z80_Bus::initReadWriteStateMachine(uint32_t waitPin,
-                                        uint32_t rdPin, uint32_t wrPin,
+bool Z80_Bus::initReadWriteStateMachine(uint32_t rdPin, uint32_t wrPin,
                                         uint32_t d0Pin, uint32_t d1Pin, uint32_t d2Pin, uint32_t d3Pin,
                                         uint32_t d4Pin, uint32_t d5Pin, uint32_t d6Pin, uint32_t d7Pin,
                                         uint32_t m1Pin)
 {
-    if (initReadWriteStateMachine(pio0, waitPin, rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin) ||
-        initReadWriteStateMachine(pio1, waitPin, rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin))
+    if (initReadWriteStateMachine(pio0, rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin) ||
+        initReadWriteStateMachine(pio1, rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin))
     {
         return true;
     }
@@ -504,7 +539,6 @@ bool Z80_Bus::initReadWriteStateMachine(uint32_t waitPin,
 }
 
 bool Z80_Bus::initReadWriteStateMachine(PIO pio,
-                                        uint32_t waitPin,
                                         uint32_t rdPin, uint32_t wrPin,
                                         uint32_t d0Pin, uint32_t d1Pin, uint32_t d2Pin, uint32_t d3Pin,
                                         uint32_t d4Pin, uint32_t d5Pin, uint32_t d6Pin, uint32_t d7Pin,
@@ -522,7 +556,6 @@ bool Z80_Bus::initReadWriteStateMachine(PIO pio,
     }
 
     // Remember the pins along with PIO instance and state machine.
-    m_waitPin = waitPin;
     m_rdPin = rdPin;
     m_wrPin = wrPin;
     m_d0Pin = d0Pin;
@@ -542,9 +575,6 @@ bool Z80_Bus::initReadWriteStateMachine(PIO pio,
 
     // Fetch the default state machine configuration for running this PIO program on a state machine.
     pio_sm_config smConfig = z80_rd_wr_program_get_default_config(m_readWriteProgramOffset);
-
-    // Side Set needs to be configured for the Z80 WAIT' pin.
-    sm_config_set_sideset_pins(&smConfig, m_waitPin);
 
     // ISR should be configured for auto push with a threshold of 2+8+1=11.
     // RD', WR', D0 - D7, M1'
@@ -575,15 +605,7 @@ bool Z80_Bus::initReadWriteStateMachine(PIO pio,
     // Complete the state machine configuration.
     pio_sm_init(pio, stateMachine, m_readWriteProgramOffset, &smConfig);
 
-    // Initialize the Y register to have a value of 0b01 to be compared with value of RD and WR pins.
-    pio_sm_exec_wait_blocking(pio, stateMachine, pio_encode_set(pio_y, 1));
-
-    // WAIT' pin should start out set to '1'.
     // D0-D7 should be configured for PIO usage as well though as they are outputs but default to input.
-    uint32_t waitPinMask = 1 << m_waitPin;
-    pio_sm_set_pins_with_mask(pio, stateMachine, waitPinMask, waitPinMask);
-    pio_sm_set_pindirs_with_mask(pio, stateMachine, waitPinMask, waitPinMask);
-    pio_gpio_init(pio, m_waitPin);
     pio_gpio_init(pio, m_d0Pin);
     pio_gpio_init(pio, m_d1Pin);
     pio_gpio_init(pio, m_d2Pin);
@@ -628,6 +650,16 @@ void Z80_Bus::uninit()
     m_clockProgramOffset = UNKNOWN_VAL;
     m_addressProgramOffset = UNKNOWN_VAL;
     m_readWriteProgramOffset = UNKNOWN_VAL;
+}
+
+void Z80_Bus::cacheWaitInstructionOpCodes()
+{
+    // Cache away the WAIT GPIO instructions that need to be sent to and executed by the state machines now that we
+    // know which GPIO pins are associated with MREQ', IOREQ', RD', and WR'.
+    m_waitReadInstruction = pio_encode_wait_gpio(true, m_rdPin);
+    m_waitWriteInstruction = pio_encode_wait_gpio(true, m_wrPin);
+    m_waitMREQInstruction = pio_encode_wait_gpio(true, m_mreqPin) | pio_encode_sideset(2, 0b10);
+    m_waitIOREQInstruction = pio_encode_wait_gpio(true, m_ioreqPin) | pio_encode_sideset(2, 0b10);
 }
 
 
@@ -683,28 +715,31 @@ int main()
         struct Z80_Bus::Request req;
         z80Bus.getNextRequest(&req);
         assert ( req.address < sizeof(memory) );
+        assert ( req.isMReq );
 
         // Perform the memory read or write from/to RAM and send response to Z80 via PIO.
-        if (req.isRead)
+        bool isRead = req.isRead;
+        uint16_t address = req.address;
+        if (isRead)
         {
-            uint8_t memByte = memory[req.address];
-            z80Bus.returnReadData(memByte);
+            req.value = memory[address];
             if (Z80_FREQUENCY <= 1000)
             {
-                printf("[%04lX]->%02X\n", req.address, memByte);
+                printf("[%04lX]->%02lX %s\n", req.address, req.value, req.isM1 ? "M1" : "");
             }
         }
         else
         {
-            memory[req.address] = req.value;
+            memory[address] = req.value;
             if (Z80_FREQUENCY <= 1000)
             {
                 printf("[%04lX]<-%02lX\n", req.address, req.value);
             }
         }
+        z80Bus.completeRequest(&req);
 
         // Check the 16-bit counter on each iteration of the loop.
-        if (req.isRead && req.address == 0x0000)
+        if (isRead && address == 0x0000)
         {
             uint16_t counter;
             memcpy(&counter, &memory[0xA], sizeof(counter));

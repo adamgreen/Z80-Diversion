@@ -18,7 +18,7 @@
 ; UNDONE: Could just PWM this.
 ; State machine code to toggle the Z80 CLOCK pin.
 ;
-; Set will need to be configured for the Z80 CLK signal.
+; SET will need to be configured for the Z80 CLK signal.
 ;   Z80 CLK should be initialized to low.
 .program z80_clk
 
@@ -33,11 +33,13 @@
 
 
 ; State machine code to detect MREQ'/IOREQ' requests, use the two shift registers to read the Z80's address bits and
-; then send them to the CPU.
+; then send them to the CPU. It will also assert the WAIT' signal while it waits for the CPU to complete the request.
 ;
 ; Side Set will need to be configured for the Shift_Clock and Shift_Latch pins.
 ;   They should be initialized with:
 ;       Shift_Clock low & Shift_Latch high.
+; SET will need to be configured for the WAIT' signal.
+;   WAIT' should be initialized in the high, un-asserted state.
 ; INPUT pins to Shift_Even, Shift_Odd, MREQ', IOREQ'.
 ; ISR should be configured for auto push with a threshold of 18. Left shift through ISR. This leaves the address in
 ;   the lower 16-bits and the MREQ and IOREQ (not inverted) in bits 16 and 17.
@@ -64,9 +66,11 @@ loop:
     ; If neither MREQ or IOREQ are asserted high then we don't have a memory or I/O request to process.
     jmp !x, loop side 0b10
 
-    ; Have a request so read out the 16-bit address value using the two shift registers.
-    ; Place MREQ and IOREQ (High if asserted) from X in ISR shift register.
+    ; Have a request so assert WAIT and read out the 16-bit address value using the two shift registers.
+    ; Assert WAIT' signal by setting it low.
     ; Falling edge of Shift_Latch to latch the address bits.
+    set pins, 0 side 0b00
+    ; Place MREQ and IOREQ (High if asserted) from X in ISR shift register.
     in x, 2 side 0b00
 
     ; Set X up for 8x2 bit address shift loop.
@@ -80,6 +84,8 @@ shift_loop:
 
     ; CPU will send "WAIT 1 GPIO nn" instruction to execute to wait for MREQ' or IOREQ' to de-assert.
     pull side 0b10
+    ; De-assert the WAIT' signal by setting it high.
+    set pins, 1 side 0b10
     ; Wait for MREQ' or IOREQ' to be de-asserted (set high).
     out exec, 16 side 0b10
 .wrap
@@ -87,47 +93,40 @@ shift_loop:
 
 
 
-; State machine code to detect RD'/WR' requests. It will assert the WAIT' signal for reads while it waits for the CPU
-; to return the requested 8-bit data.
+; State machine code to detect RD'/WR' requests.
 ;
-; Side Set will need to be configured for the WAIT' signal.
-;   It should be initialized in the high, un-asserted state.
 ; INPUT pins to RD', WR', D0-D7, M1'.
 ; OUTPUT pins to D0-D7.
 ; ISR should be configured for left shift and auto push with a threshold of 2+8+1=13.
 ; OSR should be configured for right shift with no auto pull.
 .program z80_rd_wr
 
-; Will use side set for the WAIT' signal.
-.side_set 1
-
 .wrap_target
 loop:
     ; Wait for RD' or WR' to be asserted.
     ; Load RD, WR, D0'-D7', M1 pin state into OSR shift register.
     ; Inverting the bits so that RD' and WR' both being un-asserted will result in 0b00, instead of 0b11.
-    mov osr, !pins side 1
+    mov osr, !pins
     ; Place RD and WR into X register.
-    out x, 2 side 1
+    out x, 2
     ; If RD and WR are both 0 then keep looping.
-    jmp !x, loop side 1
+    jmp !x, loop
 
     ; RD or WR was asserted.
     ; Read the pin states into ISR and have them auto pushed up to the CPU.
-    ; Assert WAIT' signal while processing read or write request.
-    in pins, 11 side 0
+    in pins, 11
 
     ; Wait for CPU to send read/write response bits.
-    pull side 0
+    pull
     ; CPU will send 0babcdefghxxxxxxxx so that it can be used for setting pindirs to input or output and then set
     ; D0-D7 with the specific value which will not be written out to Z80 if pindirs are configured as input.
-    out pindirs, 8 side 0
-    out pins, 8 side 0
+    out pindirs, 8
+    out pins, 8
     ; CPU will send 0b00000000XXXXXXXXXXXXXXXX to contain the "WAIT 1 GPIO nn" instruction to execute and then bits to
-    ; restore pindirs to
-    pull side 0
-    ; De-assert WAIT' signal and wait for RD' or WR' to be de-asserted (set high).
-    out exec, 16 side 1
+    ; restore pindirs to be inputs.
+    pull
+    ; Wait for RD' or WR' to be de-asserted (set high).
+    out exec, 16
     ; Make D0-D7 pins input again before wrapping around and waiting for the next transfer.
-    out pindirs, 8 side 1
+    out pindirs, 8
 .wrap
