@@ -14,55 +14,58 @@
 */
 ; Use the RP2040's PIO state machines to interface with the Z80.
 
-; State machine code to toggle the Z80 CLOCK pin, detect MREQ'/IOREQ' requests, use the two shift registers to read the
-; Z80's address bits and then send them to the CPU.
+
+; UNDONE: Could just PWM this.
+; State machine code to toggle the Z80 CLOCK pin.
+;
+; Set will need to be configured for the Z80 CLK signal.
+;   Z80 CLK should be initialized to low.
+.program z80_clk
+
+.wrap_target
+    ; Rising edge of Z80 CLK.
+    set pins, 1
+    ; Falling edge of Z80 CLK.
+    set pins, 0
+.wrap
+
+
+
+
+; State machine code to detect MREQ'/IOREQ' requests, use the two shift registers to read the Z80's address bits and
+; then send them to the CPU.
 ;
 ; Side Set will need to be configured for the Shift_Clock and Shift_Latch pins.
 ;   They should be initialized with:
 ;       Shift_Clock low & Shift_Latch high.
-; Set will need to be configured for the Z80 CLK signal.
-;   Z80 CLK should be initialized to low.
 ; INPUT pins to Shift_Even, Shift_Odd, MREQ', IOREQ'.
-; JMP conditional pin should be set to RFSH'.
 ; ISR should be configured for auto push with a threshold of 18. Left shift through ISR. This leaves the address in
 ;   the lower 16-bits and the MREQ and IOREQ (not inverted) in bits 16 and 17.
 ; OSR should be configured for right shift and no auto pull.
-.program z80_clk_mreq_ioreq
+.program z80_mreq_ioreq
 
 ; Will use side set for the Shift_Clock and Shift_Latch signals.
 .side_set 2
 
 .wrap_target
-next_z80_cycle:
-    ; Rising edge of Z80 CLK.
-    ; Add a single cycle delay to allow MREQ' to de-assert itself.
-    set pins, 1 side 0b10 [1]
+loop:
+    ; UNDONE: Don't hardcode gpio19 for RFSH' like this.
+    ; Just wait here if RFSH' pin is asserted low as we don't want to check MREQ'/IOREQ' when it is asserted.
+    wait 1 gpio 19 side 0b10
 
-    ; Don't need to check MREQ' and IOREQ' signals if RFSH' pin is asserted.
-    jmp pin, rfsh_not_asserted side 0b10
-    ; Z80 CLK should be kept low and then high for 2x8+10=26 state machine cycles before looping around for
-    ; next Z80 cycle.
-    nop side 0b10 [3]
-null_cycle:
-    set x, 7 side 0b10 [1]
-high_loop:
-    jmp x--, high_loop side 0b10 [1]
-    jmp clock_low side 0b10
-
-    ; RFSH' isn't asserted so check to see if either MREQ' or IOREQ' are low.
-rfsh_not_asserted:
-    ; Load IOREQ':MREQ':Shift_Odd:Shift_Even pin state into OSR shift register.
+    ; RFSH' is no longer asserted so check to see if either MREQ' or IOREQ' are low.
+    ; Load IOREQ:MREQ:!Shift_Odd:!Shift_Even pin state into OSR shift register.
+    ; Invert the bits so that IOREQ and MREQ both being un-asserted will result in 0b00, instead of 0b11.
     mov osr, !pins side 0b10
-    ; Discard Shift_Odd and Shift_Even
+    ; Discard Shift_Odd and Shift_Even bits.
     out null, 2 side 0b10
-    ; Place IOREQ and MREQ into X register.
+    ; Place active high IOREQ and MREQ bits into X register.
     out x, 2 side 0b10
-    ; If neither MREQ or IOREQ are asserted then we don't have a memory or I/O request to process.
-    jmp !x, null_cycle side 0b10
+    ; If neither MREQ or IOREQ are asserted high then we don't have a memory or I/O request to process.
+    jmp !x, loop side 0b10
 
     ; Have a request so read out the 16-bit address value using the two shift registers.
-process_address:
-    ; Place MREQ and IOREQ (Hi if asserted) from X in ISR shift register.
+    ; Place MREQ and IOREQ (High if asserted) from X in ISR shift register.
     ; Falling edge of Shift_Latch to latch the address bits.
     in x, 2 side 0b00
 
@@ -75,15 +78,10 @@ shift_loop:
     ; Rising edge of Shift_Clock.
     jmp x--, shift_loop side 0b11
 
-    ; Signal the second state machine to start waiting for the RD' or WR' signal to be asserted.
-    irq 1 rel side 0b10
-
-    ; Keep Z80 CLK low for 2x8+10=26 state machine cycles to match high state while shifting out address bits.
-clock_low:
-    set pins, 0 side 0b10 [4]
-    set x, 7 side 0b10 [4]
-clk_low_loop:
-    jmp x--, clk_low_loop side 0b10 [1]
+    ; CPU will send "WAIT 1 GPIO nn" instruction to execute to wait for MREQ' or IOREQ' to de-assert.
+    pull side 0b10
+    ; Wait for MREQ' or IOREQ' to be de-asserted (set high).
+    out exec, 16 side 0b10
 .wrap
 
 
@@ -104,14 +102,10 @@ clk_low_loop:
 .side_set 1
 
 .wrap_target
-next_request:
-    ; Wait for the first state machine program to signal the IRQ indicating that a transfer has started.
-    wait 1 irq 0 rel side 1
-
-    ; Wait for RD' or WR' to be asserted.
 loop:
-    ; Load RD', WR', D0-D7, M1' pin state into OSR shift register.
-    ; Invert the bits so that RD' and WR' both being un-asserted will result in 0b00, instead of 0b11.
+    ; Wait for RD' or WR' to be asserted.
+    ; Load RD, WR, D0'-D7', M1 pin state into OSR shift register.
+    ; Inverting the bits so that RD' and WR' both being un-asserted will result in 0b00, instead of 0b11.
     mov osr, !pins side 1
     ; Place RD and WR into X register.
     out x, 2 side 1
@@ -136,6 +130,4 @@ loop:
     out exec, 16 side 1
     ; Make D0-D7 pins input again before wrapping around and waiting for the next transfer.
     out pindirs, 8 side 1
-    ; Clear any extra address read IRQs that have occurred since this read/write transfer started.
-    irq clear 0 rel side 1
 .wrap
