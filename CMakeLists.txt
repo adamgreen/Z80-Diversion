@@ -23,7 +23,6 @@ endif()
 pico_sdk_init()
 
 add_compile_options(-Wall -Wextra -Werror
-        #-Wno-unused-function # we have some for the docs that aren't called
         -Wno-unused-parameter
         )
 

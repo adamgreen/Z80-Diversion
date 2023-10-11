@@ -47,7 +47,7 @@ static const uint32_t SHIFT_CLOCK_PIN = 5;
 static const uint32_t SHIFT_LATCH_PIN = 6;
 
 // What frequency should the Z80 be clocked at?
-static const uint32_t Z80_FREQUENCY = 500000;
+static const uint32_t Z80_FREQUENCY = 750000;
 
 
 #include <hardware/dma.h>
@@ -487,8 +487,11 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency, uint32_t wait
 
     // Set the shift register clock frequency based on the desired Z80 clock frequency by setting the PIO state machine
     // clock divisor. Run it 8 x 2 x 2 times faster so that it can shift out all 8 bits in one phase of the Z80 clock.
+    // Since each shift is done taking 4 cycles (by adding 3 delay cycles), this can be multiplied by 4 again.
     float cpuFrequency = (float)clock_get_hz(clk_sys);
-    sm_config_set_clkdiv(&smConfig, cpuFrequency / ((float)frequency * 2.0f * 8.0f * 2.0f));
+    float desiredFrequency = (float)frequency * 2.0f * 8.0f * 2.0f * 4.0f;
+    assert ( desiredFrequency <= cpuFrequency );
+    sm_config_set_clkdiv(&smConfig, cpuFrequency / desiredFrequency);
 
     // Complete the state machine configuration.
     pio_sm_init(pio, stateMachine, m_addressProgramOffset, &smConfig);

@@ -71,16 +71,16 @@ loop:
     ; Falling edge of Shift_Latch to latch the address bits.
     set pins, 0 side 0b00
     ; Place MREQ and IOREQ (High if asserted) from X in ISR shift register.
-    in x, 2 side 0b00
+    in x, 2 side 0b00 [2]
 
     ; Set X up for 8x2 bit address shift loop.
     ; Pull the Shift_Latch pin back high now that the latest address has been latched to prepare for shifting it out.
     set x, 7 side 0b10
 shift_loop:
     ; Clocking out the address bits on falling edges of Shift_Clock.
-    in pins, 2 side 0b10
+    in pins, 2 side 0b10 [3]
     ; Rising edge of Shift_Clock.
-    jmp x--, shift_loop side 0b11
+    jmp x--, shift_loop side 0b11 [3]
 
     ; CPU will send "WAIT 1 GPIO nn" instruction to execute to wait for MREQ' or IOREQ' to de-assert.
     pull side 0b10
