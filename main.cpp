@@ -451,6 +451,12 @@ bool Z80_Bus::initAddressStateMachine(PIO pio, uint32_t frequency, uint32_t wait
     // Load the PIO program.
     m_addressProgramOffset = pio_add_program(pio, &z80_mreq_ioreq_program);
 
+    // Update the "wait 1 gpio rfshPin side 0b10" instruction at the beginning of this state machine's instruction
+    // stream as rfshPin is not provided to the PIO assembler.
+    m_addressPIO->instr_mem[m_addressProgramOffset + z80_mreq_ioreq_offset_wait_instr] =
+        pio_encode_wait_gpio(true, m_rfshPin) | pio_encode_sideset(2, 0b10);
+    m_waitMREQInstruction = pio_encode_wait_gpio(true, m_mreqPin) | pio_encode_sideset(2, 0b10);
+
     // Fetch the default state machine configuration for running this PIO program on a state machine.
     pio_sm_config smConfig = z80_mreq_ioreq_program_get_default_config(m_addressProgramOffset);
 

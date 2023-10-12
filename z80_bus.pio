@@ -50,10 +50,12 @@
 .side_set 2
 
 .wrap_target
+public wait_instr:
 loop:
-    ; UNDONE: Don't hardcode gpio19 for RFSH' like this.
     ; Just wait here if RFSH' pin is asserted low as we don't want to check MREQ'/IOREQ' when it is asserted.
-    wait 1 gpio 19 side 0b10
+    ; NOTE: This instruction will be overwritten by Z80_Bus::initAddressStateMachine() as it knows which GPIO pin has
+    ;       been connected to the RFSH' pin.
+    wait 1 gpio 0 side 0b10
 
     ; RFSH' is no longer asserted so check to see if either MREQ' or IOREQ' are low.
     ; Load IOREQ:MREQ:!Shift_Odd:!Shift_Even pin state into OSR shift register.
