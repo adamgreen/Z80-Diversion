@@ -21,33 +21,34 @@ I also skimmed some RP2040 documentation again as well to make sure that I had a
 
 ## High Level BOM
 My current plan is to design and implement a simple Z80 based board that can be used to run and verify unit tests. To that end,this board will include:
-* A **Z80 Microprocessor** - I am planning to use a [Z84C0020PEG](https://www.digikey.com/en/products/detail/zilog/Z84C0020PEG/928994) device since it is:
+* A **Z80 Microprocessor** - I am using a [Z84C0020PEG](https://www.digikey.com/en/products/detail/zilog/Z84C0020PEG/928994) device since it is:
   * CMOS Based
   * 20 MHz capable. I picked the fastest CMOS version of the device available. It can run at 20MHz when powered by a 5V supply but it should be able to run at a lower 3.3V (same as the RP2040) when clocked at lower frequencies (between 1 and 2.5 MHz).
   * 40-pin DIP package. Currently Digikey only has the DIP version of the 20MHz capable part in stock. I would have preferred the LQFP SMD version but it doesn't look like it will be in stock for awhile. It also made early bread boarding possible.<br>![Photo of Z80 IC](photos/20230901-Z80_Photo.jpg)
-* A [RP2040 based Pico](https://www.digikey.com/en/products/detail/raspberry-pi/SC0915/13624793). I want to connect this to the Z80 bus and use it to service Z80 memory requests. My plan is to make it work like a hardware debugger for the Z80. Features of the RP2040 that can be leveraged for this project include:
+* A [RP2040 based Pico](https://www.digikey.com/en/products/detail/raspberry-pi/SC0915/13624793). This is connected to the Z80 bus and used to service Z80 memory requests. My plan is to make it work like a hardware debugger for the Z80. Features of the RP2040 that can be leveraged for this project include:
   * USB 1.1 controller and PHY. This can be used for easy connection to a desktop/laptop. The unit tests can be deployed and verified over this USB connection.
   * 264kB SRAM. This can be the backing store for the 64kB of address space supported by the Z80 while leaving lots around for other fun.
   * 2MB of FLASH. Lots of room for the required firmware and storage of any ROM images that we may want to use with the Z80.
   * Programmable I/O. This will be useful for interfacing with the Z80 bus without bit banging everything from the CPU.
   * Dual core Cortex-M0+ cores. Can dedicate a core to just servicing memory read/writes requests from the Z80 as they are detected and pushed to the CPU by the PIO state machines. This way things like USB interrupts don't slow down processing of Z80 memory requests.<br>![Photo of Raspberry Pi Pico](photos/20230901-RaspberryPiPico_RP2040.jpg)
   * The Pico has the required voltage regulation to allow the board to be powered direclty from USB.
-* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). These will be used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. I will probably run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would decrease. There is a good chance that I will use a faster version of this chip in future revisions.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
+* 2 x [SN74HC165 8-bit shift registers](https://www.digikey.com/en/products/detail/texas-instruments/SN74HC165N/376966). This is used to latch the 16-bit address sent from the Z80 and push it into the RP2040 over 2 serial lines, one for the even bits and the other for the odd bits. I run this chip at 5V and run the serial outputs through a 3/5 voltage divider to make it compatible with the RP2040 while also allowing it to run as close to 50MHz as possible. It can be run at 3.3V like the RP2040 but its maximum serial clock frequency would decrease. I would like to switch to a faster shift register in future revisions.<br>![Photo of 8-bit Shift Register](photos/20230901-8BitShiftRegister.jpg)
 
 
 ## Programmable I/O
-I plan to leverage the programmable I/O (PIO) peripheral on the RP2040 for interfacing to the Z80 bus. My current thoughts are to use 2 PIO state machines for this interfacing:
-* One state machine will generate the main **CLK** signal, sample the **MREQ'** / **IOREQ'** signals and shift out the 16-bit address bits using two 8-bit shift registers:
-  * If it sees either of the **MREQ'** or **IOREQ'** signals go active (pulled low) then it will latch the 16-bit address bits and start shifting out the address, two bits at a time.
-  * Once the 16-bit address has been fully shifted in, it will be pushed to the TX FIFO for the CPU to pick up.
-  * It can also issue an IRQ to the second state machine to unblock it as a read/write request is coming soon.
-* The other state machine samples the **RD'**/**WR'** signals to determine if a read or write memory transfer is being requested by the Z80:
-  * It can block on an IRQ until the first state machine detects an incoming transfer request and sets the matching IRQ.
-  * It then keeps sampling the **RD'**/**WR'** signals until it sees one of them go active (pulled low).
-  * If a read has been requested then the **WAIT'** signal can be asserted to let the Z80 know that it is waiting for the RP2040 to access the requested data.
-  * The state of the **RD'**/**WR'** lines and **D0** - **D7** are then transferred to the CPU so that between this data and the 16-bit address from the other state machine, the CPU has enough information to answer the memory request.
-  * The state machine will then wait for the CPU to send back the required response. This will include bits needed for setting **D0**-**D7** to the correct input/output state, the requested byte if a read request was made, bits to set **D0**-**D7** back to input only, and a PIO instruction that either waits on the **RD'** or **WR'** signal being de-asserted.
-  * It also de-asserts the **WAIT'** signal once the request has been completed.
+I leverage the programmable I/O (PIO) peripheral on the RP2040 for interfacing to the Z80 bus. I use 2 PIO state machines for this interfacing:
+* One state machine, ```AddressStateMachine```, samples the **MREQ'** / **IOREQ'** signals and shifts out the 16-bit address bits using two 8-bit shift registers:
+  * It pauses if it sees **RFSH'** asserted (pulled low) since those requests are just for refreshing DRAM which can be safely ignored. Once this signal is de-asserted the state machine starts running again.
+  * If it sees either of the **MREQ'** or **IOREQ'** signals go active (pulled low) then it asserts the **WAIT'** signal to let the Z80 know that it needs to wait for the RP2040 to access the requested data.
+  * It will then latch the 16-bit address bits and start shifting out the address, two bits at a time.
+  * Once the 16-bit address has been fully shifted in, it will be pushed to the RX FIFO for the CPU to pick up.
+  * The state machine will then wait for the CPU to send back the PIO instruction that either waits on the **MREQ'** or **IOREQ'** signal being de-asserted.
+  * Before executing the wait instruction it de-asserts the **WAIT'** signal to let the Z80 know that the request has been completed.
+  * It then waits for the **MREQ'** or **IOREQ'** signal to be de-asserted (pulled high again) before looping around and looking for the next request. The CPU assembles the correct ```WAIT 1 GPIO n``` instruction and sends it down to the PIO state machine via its TX FIFO.
+* The final state machine, ```ReadWriteMachine```, samples the **RD'**/**WR'** signals to determine if a read or write memory transfer is being requested by the Z80:
+  * It keeps sampling the **RD'**/**WR'** signals until it sees one of them go active (pulled low).
+  * The state of the **RD'**/**WR'** lines and **D0** - **D7** are then transferred to the CPU so that between this data and the 16-bit address from the other state machine, the CPU has enough information to perform the memory request.
+  * The state machine will then wait for the CPU to send back the required response. This will include bits needed for setting **D0**-**D7** to the correct input/output state, the requested byte if a read request was made, bits to set **D0**-**D7** back to input only, and a PIO instruction that waits on the **RD'** or **WR'** signal being de-asserted.
 
 
 ## Current Pin Map
@@ -133,6 +134,9 @@ I have been able to download and build the same Z80 fork as @chciken:
 * I have ordered and received PCBs from [OSHPark](https://oshpark.com).
 * I was able to download a Z80 port of binutils/GDB and got it to build on my Mac.
 * I soldered up one of the PCBs and successfully tested it out with the code that I have developed so far.
+* I simplified the PIO state machine code and got it running faster:
+  * Can run the Z80 at 500kHz without requiring any wait cycles.
+  * Can run the Z80 at faster clock rates (at least 5MHz) reliably but requires wait cycles as the RP2040 takes time to respond to memory read/write requests.
 
 ### Started Here
 ![Photo of Breadboard Setup](photos/20230908-Breadboard.jpg)
@@ -146,6 +150,5 @@ The screenshot below shows some early traces from my logic analyzer as I began t
 
 
 ## Next Steps
-* I have an idea of another way to implement the PIO state machine which may simplify the code and allow for faster clock rates.
 * Update MRI core to handle 16-bit registers/addresses. Today it only supports 32-bit devices. This is a good change to make anyway as there has been some interest as of late to support 64-bit architectures as well.
 * Get MRI working with the Z80 on the RP2040 to allow GDB programming and debugging.

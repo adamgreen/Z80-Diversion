@@ -15,23 +15,6 @@
 ; Use the RP2040's PIO state machines to interface with the Z80.
 
 
-; UNDONE: Could just PWM this.
-; State machine code to toggle the Z80 CLOCK pin.
-;
-; SET will need to be configured for the Z80 CLK signal.
-;   Z80 CLK should be initialized to low.
-.program z80_clk
-
-.wrap_target
-    ; Rising edge of Z80 CLK.
-    set pins, 1
-    ; Falling edge of Z80 CLK.
-    set pins, 0
-.wrap
-
-
-
-
 ; State machine code to detect MREQ'/IOREQ' requests, use the two shift registers to read the Z80's address bits and
 ; then send them to the CPU. It will also assert the WAIT' signal while it waits for the CPU to complete the request.
 ;
@@ -44,7 +27,7 @@
 ; ISR should be configured for auto push with a threshold of 18. Left shift through ISR. This leaves the address in
 ;   the lower 16-bits and the MREQ and IOREQ (not inverted) in bits 16 and 17.
 ; OSR should be configured for right shift and no auto pull.
-.program z80_mreq_ioreq
+.program z80AddressStateMachine
 
 ; Will use side set for the Shift_Clock and Shift_Latch signals.
 .side_set 2
@@ -105,7 +88,7 @@ shift_loop:
 ; OUTPUT pins to D0-D7.
 ; ISR should be configured for left shift and auto push with a threshold of 2+8+1=13.
 ; OSR should be configured for right shift with no auto pull.
-.program z80_rd_wr
+.program z80ReadWriteStateMachine
 
 .wrap_target
 loop:

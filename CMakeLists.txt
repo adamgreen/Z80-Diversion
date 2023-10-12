@@ -52,6 +52,7 @@ target_link_libraries(z80d PRIVATE
     pico_stdlib
     hardware_pio
     hardware_dma
+    hardware_pwm
     )
 pico_add_extra_outputs(z80d)
 
