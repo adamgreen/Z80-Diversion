@@ -1,3 +1,6 @@
 [submodule "pico-sdk"]
 	path = pico-sdk
 	url = ../../raspberrypi/pico-sdk.git
+[submodule "mri"]
+	path = mri
+	url = ../mri

@@ -1,0 +1,1 @@
+~/depots/z80-gdb/build/gdb/gdb -ex "set target-charset ASCII" -ex "set remotelogfile z80_mri.log" -ex "target remote /dev/cu.usbmodem111301"

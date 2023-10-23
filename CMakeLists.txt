@@ -38,18 +38,54 @@ string(REPLACE "-O2" "-O3" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITH
 
 add_executable(z80d)
 
-pico_generate_pio_header(z80d ${CMAKE_CURRENT_LIST_DIR}/z80_bus.pio)
+pico_generate_pio_header(z80d ${CMAKE_CURRENT_LIST_DIR}/Z80Bus.pio)
 
 target_sources(z80d PRIVATE
     main.cpp
+    Z80Bus.cpp
+    mri_platform.cpp
     )
 
 target_include_directories(z80d PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         )
 
+# mri submodule files.
+target_sources(z80d PRIVATE
+    mri/core/buffer.c
+    mri/core/cmd_break_watch.c
+    mri/core/cmd_common.c
+    mri/core/cmd_continue.c
+    mri/core/cmd_file.c
+    mri/core/cmd_memory.c
+    mri/core/cmd_query.c
+    mri/core/cmd_registers.c
+    mri/core/cmd_step.c
+    mri/core/cmd_thread.c
+    mri/core/cmd_vcont.c
+    mri/core/context.c
+    mri/core/gdb_console.c
+    mri/core/libc.c
+    mri/core/memory.c
+    mri/core/mri.c
+    mri/core/packet.c
+    mri/core/token.c
+    mri/core/try_catch.c
+    )
+
+target_include_directories(z80d PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/mri
+    )
+
+target_compile_definitions(z80d PRIVATE
+    MRI_ALWAYS_USE_HARDWARE_BREAKPOINT=1
+    MRI_UINT_TYPE=uint16_t
+    MRI_INT_TYPE=int16_t
+)
+
 target_link_libraries(z80d PRIVATE
     pico_stdlib
+    pico_multicore
     hardware_pio
     hardware_dma
     hardware_pwm
@@ -58,6 +94,7 @@ pico_add_extra_outputs(z80d)
 
 pico_enable_stdio_usb(z80d 1)
 pico_enable_stdio_uart(z80d 0)
+add_compile_definitions(PICO_STDIO_ENABLE_CRLF_SUPPORT=0)
 
 add_custom_target(size_elf ALL
         COMMAND arm-none-eabi-size $<TARGET_FILE:${PROJECT_NAME}>
