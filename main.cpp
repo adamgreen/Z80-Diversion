@@ -198,7 +198,7 @@ static void testIncrementingZ80Code(Z80Bus& z80Bus)
             req.value = memory[address];
             if (Z80_FREQUENCY <= 1000)
             {
-                printf("[%04X]->%02X %s\n", req.address, req.value, req.isM1 ? "M1" : "");
+                printf("[%04X]->%02X %s\r\n", req.address, req.value, req.isM1 ? "M1" : "");
             }
         }
         else
@@ -206,7 +206,7 @@ static void testIncrementingZ80Code(Z80Bus& z80Bus)
             memory[address] = req.value;
             if (Z80_FREQUENCY <= 1000)
             {
-                printf("[%04X]<-%02X\n", req.address, req.value);
+                printf("[%04X]<-%02X\r\n", req.address, req.value);
             }
         }
         z80Bus.completeRequest((Z80Bus::Request*)&req);
@@ -245,7 +245,7 @@ static void testNOPs(Z80Bus& z80Bus)
         // Display some output every once in awhile to let the user know it is still running.
         if ((req.address & 0x00FF) == 0x0000)
         {
-            printf("%04X\n", req.address);
+            printf("%04X\r\n", req.address);
         }
     }
 }
@@ -331,8 +331,8 @@ static void handleHaltDoneState(Z80Bus::Request* pReq);
 // UNDONE: Temporary.
 static const uint8_t g_testProgram[] =
 {
-    // LD SP, 0xFFF0
-    0x31, 0xF0, 0xFF,
+    // LD SP, 0x0000
+    0x31, 0x00, 0x00,
     // LD A, 0x14
     0x3E, 0x14,
     // LD I, A

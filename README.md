@@ -147,6 +147,21 @@ I found the following page on the web and it had lots of great information on ho
 
 I have been able to download and build the same Z80 fork as @chciken:
 * ```git clone https://github.com/b-s-a/binutils-gdb.git z80-gdb```
+* Apply the following diff to allow the Z80 version of GDB to handle SP being set to 0x0000:
+```diff
+diff --git a/gdb/z80-tdep.c b/gdb/z80-tdep.c
+index 641af5e06c..42f04c49f0 100644
+--- a/gdb/z80-tdep.c
++++ b/gdb/z80-tdep.c
+@@ -663,6 +663,7 @@ z80_frame_unwind_cache (struct frame_info *this_frame,
+       /* Assume that the FP is this frame's SP but with that pushed
+         stack space added back.  */
+       this_base = get_frame_register_unsigned (this_frame, Z80_SP_REGNUM);
++      if (this_base == 0x0000) this_base = 1 << gdbarch_ptr_bit(gdbarch);
+       sp = this_base + info->size;
+       if (this_base < sp_min || sp > sp_max)
+          return info;
+```
 * ```brew install texinfo```
 * ```cd z80-gdb```
 * ```mkdir build/```
