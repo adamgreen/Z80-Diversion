@@ -145,6 +145,7 @@ I have past experience with using GDB and GDB debug stubs to debug Cortex-M micr
 I found the following page on the web and it had lots of great information on how to use GDB with the Z80:
 * [chciken's TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
 
+### Building GDB for Z80
 I have been able to download and build the same Z80 fork as @chciken:
 * ```git clone https://github.com/b-s-a/binutils-gdb.git z80-gdb```
 * Apply the following diff to allow the Z80 version of GDB to handle SP being set to 0x0000:
@@ -170,10 +171,197 @@ index 641af5e06c..42f04c49f0 100644
 * ```make```
 * **Note:** I don't have ```make install``` working on macOS yet. Until then, the GDB binary can be found as ```z80-gdb/build/gdb/gdb```
 
-### Connecting GDB
-Once the board's RP2040 is connected to the PC with a USB cable, GDB can be connected to the exposed USB serial port. This is the command line I use to start the Z80 build of GDB on my machine:
+### Using GDB for Z80
+This section shows a few snippets from an example GDB session where it is attached to my Z80 board and uses them to explain some of the debug operations supported by my firmware.
+
+* First I will start the Z80 version of GDB that I talked about building up above. It instructs GDB to connect to a remote target using a virtual serial port, ```/dev/cu.usbmodem111301``` on my machine. GDB will give a warning about ```"No executable has been specified and target does not support determining executable automatically."``` because no .ELF file was provided. This means we have no symbols but we can still look at the low level assembly instructions, Z80 registers, and memory contents to figure out what our program is doing.
+* The firmware in my board is currently written so that it loads a little test program into memory at address 0, where the Z80 starts executing upon power up, hardware reset, and ```RST 0``` commands. This sample program loads known values into all of the registers.
+* The current debugger firmware also halts the Z80 when it comes out of reset, before it can even execute the first instruction at address 0x0000.
+* The first command I give GDB is ```x/24i 0x0000``` This asks GDB to dump the first 24 **i**nstructions starting at address 0x0000.
+  * The disassemble instruction doesn't work because it requires symbols to know where a function starts and we don't have a .ELF to provide those symbols.
+  * This lets us see the contents of the test program used to load known values into the registers.
 ```
-z80-gdb/build/gdb/gdb -ex "set target-charset ASCII" -ex "set remotelogfile z80_mri.log" -ex "target remote /dev/cu.usbmodem111301"
+~/depots/Z80-Diversion$ ~/depots/z80-gdb/build/gdb/gdb -ex "set target-charset ASCII" -ex "set remotelogfile z80_mri.log" -ex "target remote /dev/cu.usbmodem111301"
+GNU gdb (GDB) 10.0.50.20200317-git
+Copyright (C) 2020 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "--host=arm-apple-darwin22.6.0 --target=z80-unknown-elf".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word".
+Remote debugging using /dev/cu.usbmodem111301
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x00000000 in ?? ()
+(gdb) x/24i 0x0000
+=> 0x0:	ld sp,0x0000
+   0x3:	ld a,0x14
+   0x5:	ld i,a
+   0x7:	ld a,0x15
+   0x9:	ld r,a
+   0xb:	ld bc,0x0001
+   0xe:	push bc
+   0xf:	pop af
+   0x10:	ld bc,0x0203
+   0x13:	ld de,0x0405
+   0x16:	ld hl,0x0607
+   0x19:	ld ix,0x0809
+   0x1d:	ld iy,0x0a0b
+   0x21:	exx
+   0x22:	ex af,af'
+   0x23:	ld bc,0x0c0d
+   0x26:	push bc
+   0x27:	pop af
+   0x28:	ld bc,0x0e0f
+   0x2b:	ld de,0x1011
+   0x2e:	ld hl,0x1213
+   0x31:	ex af,af'
+   0x32:	exx
+   0x33:	jr 0x0033
+```
+
+* The next command I send to GDB is ```info reg``` to dump all of the Z80 registers at once. This version of GDB exposes all Z80 registers as 16-bit quantities so the value of an 8-bit register like A can be found in the combined 16-bit AF register.
+  * It shows that the ```PC``` register is currently set to 0x0 as expected when first coming out of reset.
+  * The rest of the registers will be given specific values as the test program runs and we can check these later once the program completes execution and enters the infinite loop at the end.
+```
+(gdb) info reg
+af             0x1401              [ C ]
+bc             0x1495              5269
+de             0x1011              0x1011
+hl             0x1213              0x1213
+sp             0xffe8              0xffe8
+pc             0x0                 0x0
+ix             0x809               0x809
+iy             0xa0b               0xa0b
+af'            0x1401              [ C ]
+bc'            0x203               515
+de'            0x405               0x405
+hl'            0x607               0x607
+ir             0x0                 0
+```
+
+* I have implemented support for 4 hardware code breakpoints and 2 hardware data watchpoints.
+  * Below I use the ```watch *(int*)0xfffe``` command to set a watchpoint to trigger when a 16-bit integer is written to the top slot on the stack. If we look at the disassembly of the code that was dumped above, we see that the SP is set to 0x0000 by the first instruction so the first 16-bit write will occur at 0x0000-2 which underflows to a value of 0xFFFE. The ```rwatch``` and ```awatch``` commands are also supported for watchpoints on reads or accesses (reads or writes).
+  * The Z80 version of GDB considers ```short``` and ```char``` to both be 8-bit values and ```int``` to be 16-bit. That's why the stack address is cast to a ```int``` in the ```watch``` command.
+  * The ```break *0x32``` command below sets a breakpoint on the ```EXX``` instruction at 0x0032.
+
+```
+(gdb) watch *(int*)0xfffe
+Hardware watchpoint 1: *(int*)0xfffe
+(gdb) break *0x32
+warning: Unable to determine inferior's software breakpoint type: couldn't find `_break_handler' function in the executable. Will be used default software breakpoint instruction RST 0x08.
+Breakpoint 2 at 0x32
+```
+
+* The next GDB command, ```disp/1i $pc```, instructs GDB to dump the current Z80 instruction when execution is halted into the debugger. This is very useful when single stepping through the code.
+```
+(gdb) disp/1i $pc
+1: x/i $pc
+=> 0x0:	ld sp,0x0000
+```
+
+* We can now use the **si** instruction to single step through the machine code, 1 instruction at a time.
+  * While my debug hardware can perform a low level hardware single step, the Z80 version of GDB is written expecting this to be difficult for Z80 based debug monitors so it interprets the next Z80 instruction to be executed. It determines what address the ```PC``` register will contain after it is executed and sets a breakpoint on that address.
+```
+(gdb) si
+0x00000003 in ?? ()
+1: x/i $pc
+=> 0x3:	ld a,0x14
+(gdb)
+0x00000005 in ?? ()
+1: x/i $pc
+=> 0x5:	ld i,a
+```
+
+* I now give GDB the ```c``` command to continue execution as normal (no more single stepping). This will cause it to run until we CTRL+C to force a break or a breakpoint/watchpoint is encountered.
+* It first stops when the first new value of ```1``` is pushed onto the top of the stack. It should be noted that watchpoints always cause the Z80 to halt on the next instruction executed after the memory access occurred and not on the instruction which actually performed the memory read or write. For example here we see it halt on a ```POP``` instruction but it was actually the previous ```PUSH``` instruction that actually wrote the new value to the stack.
+```
+(gdb) c
+Continuing.
+
+Hardware watchpoint 1: *(int*)0xfffe
+
+Old value = 0
+New value = 1
+0x0000000f in ?? ()
+1: x/i $pc
+=> 0xf:	pop af
+```
+
+* It then stops when that position on the stack is overwritten yet again.
+```
+(gdb) c
+Continuing.
+
+Hardware watchpoint 1: *(int*)0xfffe
+
+Old value = 1
+New value = 3085
+0x00000027 in ?? ()
+1: x/i $pc
+=> 0x27:	pop af
+```
+
+* This time the Z80 is halted when it gets to the instruction at address 0x32, the address on which breakpoint #2 was set previously.
+```
+(gdb) c
+Continuing.
+
+Breakpoint 2, 0x00000032 in ?? ()
+1: x/i $pc
+=> 0x32:	exx
+```
+
+* If we continue execution now, the Z80 will enter an infinite loop with the ```JR 0x0033``` instruction.
+* To halt the Z80 so that we can look at its current state, we need to press CTRL+C in GDB to interrupt the Z80's current execution and halt into the debugger.
+* The output from GDB shows that the Z80 was executing the infinite loop at 0x33 as expected.
+```
+(gdb) c
+Continuing.
+^C
+Program received signal SIGINT, Interrupt.
+0x00000033 in ?? ()
+1: x/i $pc
+=> 0x33:	jr 0x0033
+```
+
+* At this point I send the ```info reg``` command again to look at the contents of all the Z80 registers and see that they match the values that were placed in them with the little test program dumped at the beginning of this debug session: 0x00 in A, 0x01 in F, 0x02 in B, 0x03 in C, etc.
+```
+(gdb) info reg
+af             0x1                 [ C ]
+bc             0x203               515
+de             0x405               0x405
+hl             0x607               0x607
+sp             0x0                 0x0
+pc             0x33                0x33
+ix             0x809               0x809
+iy             0xa0b               0xa0b
+af'            0xc0d               [ C P/V F3 ]
+bc'            0xe0f               3599
+de'            0x1011              0x1011
+hl'            0x1213              0x1213
+ir             0x14f7              5367
+```
+
+* The ```dump ihex memory``` command can be used to dump a specific section of memory to a .hex file. The following snippet shows dumping all 64k of memory to a file named ```test.hex```
+```
+(gdb) dump ihex memory test.hex 0 0x10000
+(gdb) shell ls -l *.hex
+-rw-r--r--  1 foobar  staff  184333 Nov  1 02:54 test.hex
+```
+
+* Such a dump can be used to write known values into memory at a later point in time using the ```restore``` command.
+```
+(gdb) restore test.hex
+Restoring section .sec1 (0x0 to 0x10000)
 ```
 
 
