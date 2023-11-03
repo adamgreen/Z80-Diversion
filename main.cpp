@@ -264,6 +264,9 @@ enum Z80Commands
     COMMAND_HALT,
     // Resume after Z80 has been halted. Only sent when control thread is in STATE_HALTED state.
     COMMAND_HALT_RESUME,
+    // Resume after Z80 has been halted and reset. Skip register popping. Only sent when control thread is in
+    // STATE_HALTED state.
+    COMMAND_HALT_RESET_RESUME,
     // Let one M1 through and then enter halt mode like COMMAND_HALT.
     COMMAND_SINGLE_STEP
 };
@@ -420,11 +423,21 @@ static void runDebugger()
             wasInterrupted = false;
             g_reason.type = MRI_PLATFORM_TRAP_TYPE_UNKNOWN;
 
-            // Debugging is complete so restore the Z80 registers and prepare to resume the CPU.
-            g_command = COMMAND_HALT_RESUME;
+            if (shouldReset())
+            {
+                // Reset the Z80 and prepare to resume the CPU without restoring register contents.
+                g_z80Bus.resetZ80();
+                g_command = COMMAND_HALT_RESET_RESUME;
+            }
+            else
+            {
+                // Debugging is complete so restore the Z80 registers and prepare to resume the CPU.
+                g_command = COMMAND_HALT_RESUME;
+            }
+
             while (g_state != STATE_HALT_DONE)
             {
-                // Wait for Z80 state to be restored.
+                // Wait for the Z80 control thread to finish processing the resume command.
             }
 
             if (Platform_IsSingleStepping())
@@ -893,14 +906,23 @@ static uint16_t __not_in_flash_func(readHalfWord)(uint16_t address)
 }
 
 // All registers have been pushed to the stack and then copied over to g_registers.
-// Waits for COMMAND_HALT_RESUME in g_command before continuing to next state.
+// Waits for COMMAND_HALT_RESUME or COMMAND_HALT_RESET_RESUME in g_command before continuing to next state.
 // Once a resume has been requested, it copies update register values back onto the stack and then transitions to
 // the HALT_POPPING state.
 static void __not_in_flash_func(handleHaltedState)(Z80Bus::Request* pReq)
 {
-    while (g_command != COMMAND_HALT_RESUME)
+    while (g_command != COMMAND_HALT_RESUME && g_command != COMMAND_HALT_RESET_RESUME)
     {
         // Wait here with Z80 WAIT' signal asserted until execution should be resumed.
+    }
+
+    // Switch directly into STATE_HALT_DONE if the Z80 was just reset since registers don't need to be restored.
+    if (g_command == COMMAND_HALT_RESET_RESUME)
+    {
+        g_state = STATE_HALT_DONE;
+        // Current request is left outstanding.
+        // It is still just left in a WAIT' state all this time.
+        return;
     }
 
     // Correct for POPing and RETN M1 cycles that will be encountered after R value is restored.
@@ -980,7 +1002,14 @@ static void __not_in_flash_func(handleHaltPoppingState)(Z80Bus::Request* pReq)
 // than COMMAND_HALT_RESUME.
 static void __not_in_flash_func(handleHaltDoneState)(Z80Bus::Request* pReq)
 {
-    while (g_command == COMMAND_HALT_RESUME)
+    if (g_command == COMMAND_HALT_RESET_RESUME)
+    {
+        // Fake that this request has been completed since the PIO state machine has been reset since this request was
+        // made.
+        pReq->isCompleted = true;
+    }
+
+    while (g_command == COMMAND_HALT_RESUME || g_command == COMMAND_HALT_RESET_RESUME)
     {
         // Wait here with Z80 WAIT' signal asserted until execution should be resumed.
     }

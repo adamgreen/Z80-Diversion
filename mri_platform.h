@@ -91,5 +91,6 @@ bool initDebugger(uint8_t* pMemory, size_t memorySize,
                   uint32_t* pBreakpoints, size_t breakpointCount,
                   Z80Watchpoint* pWatchpoints, size_t watchpointCount);
 void enterDebugger(Z80Registers* pRegisters, uint8_t signal, PlatformTrapReason* pReason);
+bool shouldReset();
 
 #endif // MRI_PLATFORM_H_

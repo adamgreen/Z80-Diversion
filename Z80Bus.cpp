@@ -49,7 +49,7 @@ bool Z80Bus::init(uint32_t frequency,
     // parameters (ie. frequency).
     uninit();
 
-    resetZ80(resetPin, z80ClockPin, frequency);
+    manualResetZ80(resetPin, z80ClockPin, frequency);
 
     if (!initAddressStateMachine(frequency, waitPin, shiftClockPin, shiftLatchPin, shiftEvenPin, shiftOddPin, mreqPin, ioreqPin, rfshPin) ||
         !initReadWriteStateMachine(rdPin, wrPin, d0Pin, d1Pin, d2Pin, d3Pin, d4Pin, d5Pin, d6Pin, d7Pin, m1Pin))
@@ -65,7 +65,7 @@ bool Z80Bus::init(uint32_t frequency,
     return true;
 }
 
-void Z80Bus::resetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Frequency)
+void Z80Bus::manualResetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Frequency)
 {
     // Configure pins connected to the Z80 CLK and RESET' signals as output.
     const uint32_t clockPinMask = 1 << z80ClockPin;
@@ -94,6 +94,9 @@ void Z80Bus::resetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Fr
 
     // De-assert the RESET' pin.
     gpio_set_mask(resetPinMask);
+
+    // Remember the reset pin.
+    m_resetPin = z80ResetPin;
 }
 
 bool Z80Bus::initAddressStateMachine(uint32_t frequency, uint32_t waitPin,
@@ -340,12 +343,20 @@ void Z80Bus::initClock(uint32_t frequency, uint32_t z80ClockPin)
     pwm_init(pwmSlice, &config, true);
     pwm_set_chan_level(pwmSlice, pwmChannel, top / 2);
 
-    // Remember the clock pin.
+    // Remember the clock pin and frequency.
     m_z80ClockPin = z80ClockPin;
+    m_frequency = frequency;
+
+    // Also remember the PWM resources used for uninit.
+    m_pwmSlice = pwmSlice;
+    m_pwmChannel = pwmChannel;
 }
 
 void Z80Bus::uninit()
 {
+    // Shutdown the PWM generated Z80 clock.
+    uninitClock();
+
     // Stop the state machines and free up their resources.
     if (m_readWritePIO != NULL)
     {
@@ -367,6 +378,21 @@ void Z80Bus::uninit()
     }
 }
 
+void Z80Bus::uninitClock()
+{
+    if (m_pwmChannel == UNKNOWN_VAL)
+    {
+        return;
+    }
+
+    // Turn off the PWM used for the Z80 clock.
+    pwm_set_chan_level(m_pwmSlice, m_pwmChannel, 0);
+    gpio_set_function(m_z80ClockPin, GPIO_FUNC_SIO);
+
+    m_pwmChannel = UNKNOWN_VAL;
+    m_pwmSlice = UNKNOWN_VAL;
+}
+
 void Z80Bus::cacheWaitInstructionOpCodes()
 {
     // Cache away the WAIT GPIO instructions that need to be sent to and executed by the state machines now that we
@@ -375,4 +401,16 @@ void Z80Bus::cacheWaitInstructionOpCodes()
     m_waitWriteInstruction = pio_encode_wait_gpio(true, m_wrPin);
     m_waitMREQInstruction = pio_encode_wait_gpio(true, m_mreqPin) | pio_encode_sideset(2, 0b10);
     m_waitIOREQInstruction = pio_encode_wait_gpio(true, m_ioreqPin) | pio_encode_sideset(2, 0b10);
+}
+
+void Z80Bus::resetZ80()
+{
+    // Reset the Z80 by re-initializing this object which performs a reset as part of the process.
+    bool result = init(m_frequency,
+         m_resetPin, m_z80ClockPin, m_mreqPin, m_ioreqPin, m_rdPin, m_wrPin,
+         m_d0Pin, m_d1Pin, m_d2Pin, m_d3Pin, m_d4Pin, m_d5Pin, m_d6Pin, m_d7Pin,
+         m_m1Pin, m_waitPin, m_rfshPin, m_haltPin,
+         m_shiftClockPin, m_shiftLatchPin, m_shiftEvenPin, m_shiftOddPin);
+    assert ( result );
+    (void)result;
 }

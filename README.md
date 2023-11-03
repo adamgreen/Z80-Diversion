@@ -29,6 +29,7 @@ I want to verify some unit tests which exercise all of the instructions supporte
   * Single step the Z80.
   * Set up to 4 Code Breakpoints.
   * Set up to 2 Data Watchpoints
+  * Z80 reset from GDB.
 
 
 ## Reading List
@@ -362,6 +363,20 @@ ir             0x14f7              5367
 ```
 (gdb) restore test.hex
 Restoring section .sec1 (0x0 to 0x10000)
+```
+
+* The ```monitor reset``` command can be used to assert the **RESET'** pin on the Z80 to force a hardware reset.
+    * Breakpoints and watchpoints set before the reset are still active after the reset. This means that you can set a breakpoint at address 0x0000 to cause the Z80 to halt as soon as it comes out of reset if you want to step through your reset code.
+    * The actual reset doesn't actually occur until the next ```continue``` command is sent from GDB.
+```
+(gdb) break *0
+Breakpoint 3 at 0x0
+(gdb) monitor reset
+Will reset on next continue.
+(gdb) c
+Continuing.
+
+Breakpoint 3, 0x00000000 in ?? ()
 ```
 
 

@@ -39,6 +39,7 @@ static size_t             g_watchpointCount = 0;
 static Z80Registers*      g_pRegisters = NULL;
 static PlatformTrapReason g_reason;
 static uint8_t            g_signal = SIGINT;
+static bool               g_shouldReset = false;
 
 bool initDebugger(uint8_t* pMemory, size_t memorySize,
                   uint32_t* pBreakpoints, size_t breakpointCount,
@@ -81,6 +82,12 @@ void enterDebugger(Z80Registers* pRegisters, uint8_t signal, PlatformTrapReason*
 
     mriDebugException(&context);
 }
+
+bool shouldReset()
+{
+    return g_shouldReset;
+}
+
 
 
 
@@ -166,6 +173,7 @@ static uintmri_t g_originalPC = 0;
 void Platform_EnteringDebugger(void)
 {
     g_originalPC = Platform_GetProgramCounter();
+    g_shouldReset = false;
     Platform_DisableSingleStep();
 }
 
@@ -566,7 +574,7 @@ __throws void Platform_ClearHardwareWatchpoint(uintmri_t address, uintmri_t size
 // *********************************************************************************************************************
 void Platform_ResetDevice(void)
 {
-    assert ( false );
+    g_shouldReset = true;
 }
 
 

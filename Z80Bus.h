@@ -188,14 +188,18 @@ class Z80Bus
             pReq->isCompleted = true;
         }
 
+        // Returns true if the provided Z80 machine code byte is a prefix opcode.
         static bool isPrefixOpcode(uint8_t value)
         {
             return value == 0xCB || value == 0xDD || value == 0xED || value == 0xFD;
         }
 
+        // Pulls the Z80 RESET' pin low for >= 4 clock cycles. Resets the PIO state machines as well.
+        void resetZ80();
+
 
     protected:
-        void resetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Frequency);
+        void manualResetZ80(uint32_t z80ResetPin, uint32_t z80ClockPin, uint32_t z80Frequency);
         bool initAddressStateMachine(uint32_t frequency, uint32_t waitPin,
                                      uint32_t shiftClockPin, uint32_t shiftLatchPin,
                                      uint32_t shiftEvenPin, uint32_t shiftOddPin, uint32_t mreqPin, uint32_t ioreqPin,
@@ -214,6 +218,7 @@ class Z80Bus
                                        uint32_t d4Pin, uint32_t d5Pin, uint32_t d6Pin, uint32_t d7Pin,
                                        uint32_t m1Pin);
         void initClock(uint32_t frequency, uint32_t z80ClockPin);
+        void uninitClock();
         void cacheWaitInstructionOpCodes();
 
 
@@ -229,6 +234,12 @@ class Z80Bus
         uint32_t        m_readWriteStateMachine = UNKNOWN_VAL;
         uint32_t        m_readWriteProgramOffset = UNKNOWN_VAL;
 
+        // PWM resources used for Z80 clock generation.
+        uint32_t        m_pwmSlice = UNKNOWN_VAL;
+        uint32_t        m_pwmChannel = UNKNOWN_VAL;
+
+        // Z80 clock frequency.
+        uint32_t        m_frequency = 0;
         // Reset pin of the Z80.
         uint32_t        m_resetPin = 0;
         // Pins used by the first state machine.
