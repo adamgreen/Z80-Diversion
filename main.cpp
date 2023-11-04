@@ -726,8 +726,11 @@ static uint8_t g_rst8PopCode[] =
     0xED, 0x45
 };
 
+// Z80 registers are placed/restored in/from this fake stack.
+static uint8_t  g_fakeStack[24];
+static uint16_t g_fakeSP = 0xFFFF;
+
 // Record the last two bytes written and their addresses as it could have been the PC being pushed to the stack.
-static uint8_t  g_last2BytesWritten[2];
 static uint16_t g_last2AddressesWritten[2];
 
 // SP at the time of the halt. Based on g_last2AddressesWritten[0] since it will indicate where the PC was pushed onto
@@ -785,9 +788,12 @@ static void __not_in_flash_func(handleHaltStartState)(Z80Bus::Request* pReq)
             // In debug builds, can assert that at least one of these bytes has been changed by the time the first instruction
             // from the RST 8 vector is fetched. This makes sure that the PC was pushed to the stack as expected.
 #ifndef NDEBUG
-            memset(g_last2BytesWritten, 0xFF, sizeof(g_last2BytesWritten));
+            memset(g_fakeStack, 0xFF, sizeof(g_fakeStack));
             memset(g_last2AddressesWritten, 0xFF, sizeof(g_last2AddressesWritten));
 #endif
+            // The PC and subsequent Z80 register pushes will be pushed to the g_fakeStack rather than g_memory.
+            g_fakeSP = sizeof(g_fakeStack);
+
             // Wait for instruction fetch from RST 8 vector.
             g_state = STATE_HALT_WAIT_RST8_VECTOR;
         }
@@ -810,15 +816,12 @@ static void __not_in_flash_func(handleHaltWaitRst8State)(Z80Bus::Request* pReq)
     (void)isM1;
     if (!isRead)
     {
-        // UNDONE: These should be the 2 stack writes for PC given that RST 8 instruction was inserted and we know exactly what happens next.
-        //         So I don't need to actually push to device's RAM. I can hide in a global instead.
-        // First process the most recent write request.
+        // Treat as a stack push and redirect it to the fake stack.
         uint8_t value = pReq->value;
-        g_memory[address] = value;
+        assert ( g_fakeSP > 0 );
+        g_fakeStack[--g_fakeSP] = value;
 
-        // Next, track the Z80 writes as the last 2 before fetching code from the RST 8 vector will be the pushed PC.
-        g_last2BytesWritten[0] = g_last2BytesWritten[1];
-        g_last2BytesWritten[1] = value;
+        // Record the write addresses as they indicate the SP to which the "RST 8" pushed the PC.
         g_last2AddressesWritten[0] = g_last2AddressesWritten[1];
         g_last2AddressesWritten[1] = address;
     }
@@ -826,7 +829,8 @@ static void __not_in_flash_func(handleHaltWaitRst8State)(Z80Bus::Request* pReq)
     {
         // The first read must be to fetch the first instruction from the RST 8 vector.
         assert ( isM1 && address == RST8_VECTOR_ADDRESS );
-        assert ( g_last2BytesWritten[0] != 0xFF || g_last2BytesWritten[1] != 0xFF ||
+        assert ( g_fakeSP == sizeof(g_fakeStack) - 2 );
+        assert ( g_fakeStack[g_fakeSP] != 0xFF || g_fakeStack[g_fakeSP + 1] != 0xFF ||
                  g_last2AddressesWritten[0] != 0xFFFF || g_last2AddressesWritten[1] != 0xFFFF );
         assert ( g_last2AddressesWritten[0] == g_last2AddressesWritten[1] + 1 );
 
@@ -862,18 +866,18 @@ static void __not_in_flash_func(handleHaltPushingState)(Z80Bus::Request* pReq)
             // Have made it to the end of the register pushing code so copy the Z80 register values from what was just
             // saved on the stack and then signal the main thread that the halt is now complete.
             g_registers.sp = g_SP;
-            g_registers.pc = readHalfWord(g_SP - 2);
-            g_registers.af = readHalfWord(g_SP - 4);
-            g_registers.bc = readHalfWord(g_SP - 6);
-            g_registers.de = readHalfWord(g_SP - 8);
-            g_registers.hl = readHalfWord(g_SP - 10);
-            g_registers.ix = readHalfWord(g_SP - 12);
-            g_registers.iy = readHalfWord(g_SP - 14);
-            g_registers._af = readHalfWord(g_SP - 16);
-            g_registers._bc = readHalfWord(g_SP - 18);
-            g_registers._de = readHalfWord(g_SP - 20);
-            g_registers._hl = readHalfWord(g_SP - 22);
-            g_registers.ir = readHalfWord(g_SP - 24);
+            g_registers.pc = readHalfWord(22);
+            g_registers.af = readHalfWord(20);
+            g_registers.bc = readHalfWord(18);
+            g_registers.de = readHalfWord(16);
+            g_registers.hl = readHalfWord(14);
+            g_registers.ix = readHalfWord(12);
+            g_registers.iy = readHalfWord(10);
+            g_registers._af = readHalfWord(8);
+            g_registers._bc = readHalfWord(6);
+            g_registers._de = readHalfWord(4);
+            g_registers._hl = readHalfWord(2);
+            g_registers.ir = readHalfWord(0);
 
             // Subtract 1 from PC to account for the 1-byte "RST 8" instruction used to halt the CPU.
             g_registers.pc -= 1;
@@ -892,17 +896,21 @@ static void __not_in_flash_func(handleHaltPushingState)(Z80Bus::Request* pReq)
     }
     else
     {
-        // Service writes (pushing register values to the stack) as normal.
-        g_memory[address] = pReq->value;
+        // Service writes by pushing register values to the fake stack.
+        // Make sure that the writes are going to the expected addresses.
+        assert ( g_fakeSP > 0 );
+        g_fakeSP--;
+        assert ( sizeof(g_fakeStack) - g_fakeSP == g_SP - address );
+        g_fakeStack[g_fakeSP] = pReq->value;
     }
 
     g_z80Bus.completeRequest(pReq);
 }
 
-// Reads a little endian 16-bit value from the Z80's stack in RAM.
+// Reads a little endian 16-bit value from the fake stack.
 static uint16_t __not_in_flash_func(readHalfWord)(uint16_t address)
 {
-    return (uint16_t)g_memory[address] | ((uint16_t)g_memory[address+1] << 8);
+    return (uint16_t)g_fakeStack[address] | ((uint16_t)g_fakeStack[address+1] << 8);
 }
 
 // All registers have been pushed to the stack and then copied over to g_registers.
@@ -936,18 +944,18 @@ static void __not_in_flash_func(handleHaltedState)(Z80Bus::Request* pReq)
     {
         g_SP = 0x10000;
     }
-    writeHalfWord(g_SP - 2, g_registers.pc);
-    writeHalfWord(g_SP - 4, g_registers.af);
-    writeHalfWord(g_SP - 6, g_registers.bc);
-    writeHalfWord(g_SP - 8, g_registers.de);
-    writeHalfWord(g_SP - 10, g_registers.hl);
-    writeHalfWord(g_SP - 12, g_registers.ix);
-    writeHalfWord(g_SP - 14, g_registers.iy);
-    writeHalfWord(g_SP - 16, g_registers._af);
-    writeHalfWord(g_SP - 18, g_registers._bc);
-    writeHalfWord(g_SP - 20, g_registers._de);
-    writeHalfWord(g_SP - 22, g_registers._hl);
-    writeHalfWord(g_SP - 24, g_registers.ir);
+    writeHalfWord(22, g_registers.pc);
+    writeHalfWord(20, g_registers.af);
+    writeHalfWord(18, g_registers.bc);
+    writeHalfWord(16, g_registers.de);
+    writeHalfWord(14, g_registers.hl);
+    writeHalfWord(12, g_registers.ix);
+    writeHalfWord(10, g_registers.iy);
+    writeHalfWord(8, g_registers._af);
+    writeHalfWord(6, g_registers._bc);
+    writeHalfWord(4, g_registers._de);
+    writeHalfWord(2, g_registers._hl);
+    writeHalfWord(0, g_registers.ir);
 
     // Modify popping code to explicitly set SP to the value corresponding to g_registers.sp after the context has
     // been pushed to the stack (SP - 24).
@@ -961,11 +969,11 @@ static void __not_in_flash_func(handleHaltedState)(Z80Bus::Request* pReq)
     // It was just left in a WAIT' state all this time.
 }
 
-// Writes a little endian 16-bit value to the Z80's stack in RAM.
+// Writes a little endian 16-bit value to the fake stack.
 static void __not_in_flash_func(writeHalfWord)(uint16_t address, uint16_t value)
 {
-    g_memory[address] = value;
-    g_memory[address+1] = value >> 8;
+    g_fakeStack[address] = value;
+    g_fakeStack[address+1] = value >> 8;
 }
 
 // The Z80 is now given code which pops all of the registers from the stack.
@@ -984,13 +992,18 @@ static void __not_in_flash_func(handleHaltPoppingState)(Z80Bus::Request* pReq)
     }
     else
     {
-        // Should be a stack read.
+        // Should be a stack read from the expected SP address.
         assert ( address >= g_SP - 24 && address < g_SP );
-        pReq->value = g_memory[address];
+
+        // Redirect stack read to fake stack.
+        assert ( g_fakeSP < sizeof(g_fakeStack) );
+        assert ( sizeof(g_fakeStack) - g_fakeSP == g_SP - address );
+        pReq->value = g_fakeStack[g_fakeSP++];
 
         // If just finished popping off the last byte of the return address from the stack then we can switch state.
         if (address == g_SP - 1)
         {
+            assert ( g_fakeSP == sizeof(g_fakeStack) );
             g_state = STATE_HALT_DONE;
         }
     }
